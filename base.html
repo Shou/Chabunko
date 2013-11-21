@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<title>Chabunko</title>
+
+<style type=text/css>
+
+html, body
+    { padding: 0
+    ; margin: 0
+    ; font-family: %font
+    ; font-size: %size
+    ; background-color: %bg
+    ; color: %fg
+    }
+
+a { color: %link }
+
+input
+    { color: %fg
+    ; background-color: %bg
+    ; border: none
+    ; font-family: %font
+    ; font-size: %size
+    }
+
+#log
+    { padding: 2px
+    ; display: table
+    ; width: 100%
+    ; max-width: 100%
+    ; overflow: hidden
+    }
+
+#inputform
+    { position: fixed
+    ; bottom: 0
+    ; left: 0
+    ; display: block
+    ; width: 100%
+    }
+
+#input
+    { overflow: hidden
+    ; display: block
+    ; width: 100%
+    ; border-top: 1px solid %fg
+    }
+
+#input:hover
+    { background-color: %hoverbg }
+
+#self
+    { display: block
+    ; float: left
+    ; background-color: %bg
+    ; color: %fg
+    ; border-top: 1px solid %fg
+    }
+
+#self:hover
+    { background-color: %hoverbg }
+
+.timestamp
+    { color: %info }
+
+.nick
+    { color: #bb88dd
+    ; text-align: right
+    ; padding: 0pt 8pt
+    ; border-right: 1px solid %fg
+    ; max-width: 100pt
+    ; text-overflow: ellipsis
+    ; overflow: hidden
+    }
+
+.message
+    { padding: 0pt 9pt
+    ; width: 100%
+    }
+
+span.line
+    { display: table-row }
+
+span.line:nth-child(odd)
+    { background-color: %oddbg }
+
+span.line:nth-child(even)
+    { background-color: %evenbg }
+
+span.line:hover
+    { background-color: %hoverbg }
+
+span.line > span
+    { display: table-cell
+    ; white-space: pre
+    }
+
+span.line > .message
+    { white-space: normal }
+
+.embed
+    { max-height: 64px
+    ; max-width: auto
+    ; display: block
+    }
+
+.highlight
+    { color: %highlight }
+
+%css
+</style>
+
+<script type=text/javascript>
+
+var nick = "%nick"
+
+var time = 1000
+
+var colors =
+    { white: "%white", black: "%black", blue: "%blue", green: "%green"
+    , red: "%red", darkred: "%darkred", darkmagenta: "%darkmagenta"
+    , orange: "%orange" , yellow: "%yellow", lightgreen: "%lightgreen"
+    , cyan: "%cyan", lightcyan: "%lightcyan", darkblue: "%darkblue"
+    , magenta: "%magenta", gray: "%gray", lightgray: "%lightgray"
+    }
+
+var colorints =
+    { white: "00", black: "01", blue: "02", green: "03", red: "04"
+    , darkred: "05", darkmagenta: "06", orange: "07", yellow: "08"
+    , lightgreen: "09", cyan: "10", lightcyan: "11", darkblue: "12"
+    , magenta: "13", gray: "14", lightgray: "15"
+    }
+
+// flash :: String -> IO ()
+function flash(c){
+    var inp = document.getElementById("input")
+
+    inp.style.backgroundColor = c
+    setTimeout(function(){ inp.style.backgroundColor = "" }, 1000)
+    inp.value = ""
+}
+
+// submit :: String -> IO ()
+function submit(s){
+    var xhr = new XMLHttpRequest()
+    xhr.timeout = 10800
+
+    var f = function(){
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) flash("green")
+            else flash("red")
+        }
+    }
+
+    xhr.onreadystatechange = f
+
+    xhr.open("GET", "/irc-send?nick=" + encodeURIComponent(nick) + "&msg="
+            + encodeURIComponent(s)
+            )
+
+    xhr.send()
+}
+
+// | Load new messages. Takes time as a string as the only argument.
+// loadNew :: String -> IO ()
+function loadNew(time){
+    var xhr = new XMLHttpRequest()
+    xhr.timeout = 10800
+
+    var f = function(){
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) addNew(xhr.responseText)
+            else console.warn("Unable to load new messages.")
+        }
+    }
+
+    xhr.onreadystatechange = f
+
+    xhr.open("GET", "/irc-new?nick=" + encodeURIComponent(nick) + "&time="
+            + encodeURIComponent(time) + "&rand="
+            + encodeURIComponent((new Date()).getTime())
+            )
+
+    xhr.send()
+}
+
+function nickColor(name){
+    var rcolors = [ colors["blue"], colors["green"], colors["red"]
+                  , colors["darkred"], colors["darkmagenta"], colors["orange"]
+                  , colors["yellow"], colors["lightgreen"], colors["cyan"]
+                  , colors["lightcyan"], colors["darkblue"], colors["magenta"]
+                  ]
+    var sum = 0
+
+    for(var i = 0; i < name.length; i++) {
+        sum += name.charCodeAt(i)
+    }
+
+    sum = sum % rcolors.length
+
+    return rcolors[sum]
+}
+
+function nickOnly(name){
+    return name.replace(/^[~&@%+]/, "")
+}
+
+function embed(url){
+    var la = "<a target=_blank href=" + url + ">"
+    var mid = url
+    var ra = "</a>"
+
+    if (url.match(/(jpe?g|a?png|gif|bmp)(\?\S+)?$/i))
+        mid = "<img class=embed src="
+            + url
+            + " alt="
+            + url
+            + ">"
+
+    if (url.match(/youtu(\.be\/|be\.com\/watch\?v=\S+)/i))
+        mid = "<img class=embed src=http://img.youtube.com/vi/"
+            + url.match(/(youtu\.be\/|v=)(\S{11})/)[2]
+            + "/0.jpg alt="
+            + url
+            + ">"
+
+    return la + mid + ra
+}
+
+// addNew :: String -> IO ()
+function addNew(html){
+    console.log(html)
+    if (html.length > 0) {
+        var log = document.getElementById("log")
+        var ms = log.children
+        var olen = ms.length
+        log.innerHTML += html
+        var nlen = document.getElementById("log").children.length
+
+        console.log("nlen: " + nlen + ", olen: " + olen)
+        console.log("Found " + (nlen - olen) + " new messages~")
+
+        for (var i = olen - 1; i < nlen; i++) prepareLine(ms[i])
+
+        time = 1000
+
+    } else {
+        console.log("Found no new messages!")
+        time = Math.min(time * 2, 10800)
+    }
+}
+
+function prepareLine(line){
+    var ts = line.children[0]
+    var ni = line.children[1]
+    var ms = line.children[2]
+
+    // Nick coloring
+    if ("%nick" !== nickOnly(ni.textContent))
+        ni.style.color = nickColor(nickOnly(ni.textContent))
+    else ni.style.color = "%self"
+
+    // URLs and embedding
+    ms.innerHTML = ms.innerHTML.replace(/https?:\/\/\S+/i, embed)
+
+    // Word highlighting
+    if (ms.textContent.match(RegExp(nick, 'i'))) {
+        console.log("Highlight: " + nick)
+        ms.className += " highlight"
+    }
+}
+
+// main :: IO ()
+function main(){
+    var iw = document.getElementById("inputform")
+    iw.addEventListener("submit", function(e){
+        e.preventDefault()
+        submit(this.getElementsByName("msg")[0].value)
+    })
+
+    var inp = document.getElementById("input")
+
+    document.body.addEventListener("keyup", function(e){
+        if (e.keyCode >= 32 || e.keyCode == 8) {
+            e.stopPropagation()
+            inp.value += String.fromCharCode(e.keyCode)
+            inp.focus()
+        }
+    })
+    inp.addEventListener("keyup", function(e){
+        e.stopPropagation()
+        if (e.keyCode === 13) submit(this.value)
+    })
+
+    var snick = document.getElementById("self")
+    snick.style.color = nickColor(snick.value)
+
+    var lines = document.getElementsByClassName("line")
+
+    console.log(lines.length + " lines")
+    for (var i = 0; i < lines.length; i++) prepareLine(lines[i])
+
+    document.getElementById("input").focus()
+
+    newLoop()
+}
+
+// newLoop :: IO ()
+function newLoop(){
+    setTimeout(function(){
+        var ts = document.getElementsByClassName("timestamp")
+        var stime = ts[ts.length - 1].textContent
+        console.log("Loading from timestamp " + stime)
+        loadNew(stime)
+
+        newLoop()
+    }, time)
+}
+
+</script>
+
+</head>
+
+<body>
+
+<div id=wrap>
+
+<div id=log>
+%html
+</div>
+
+<input>
+
+<form id=inputform method=POST>
+    <div id=inputwrap>
+        <input type=button class=nick id=self value=%nick>
+        <input type=text id=input name=msg>
+        <input type=hidden name=nick value=%nick>
+    </div>
+</form>
+
+</div>
+
+<script> main() </script>
+
+</body>
+
+</html>
+
