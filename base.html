@@ -241,7 +241,6 @@ function addNew(html){
         log.innerHTML += html
         var nlen = document.getElementById("log").children.length
 
-        console.log("nlen: " + nlen + ", olen: " + olen)
         console.log("Found " + (nlen - olen) + " new messages~")
 
         for (var i = olen - 1; i < nlen; i++) prepareLine(ms[i])
@@ -267,6 +266,9 @@ function prepareLine(line){
     // URLs and embedding
     ms.innerHTML = ms.innerHTML.replace(/https?:\/\/\S+/i, embed)
 
+    // 
+
+    // XXX only highlight nick?
     // Word highlighting
     if (ms.textContent.match(RegExp(nick, 'i'))) {
         console.log("Highlight: " + nick)

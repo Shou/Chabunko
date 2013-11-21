@@ -61,6 +61,11 @@ mvar :: MVar Text
 mvar = unsafePerformIO newEmptyMVar
 
 
+atMay :: Int -> [a] -> Maybe a
+atMay _ [] = Nothing
+atMay 0 (x:_) = Just x
+atMay n (x:xs) = atMay (pred n) xs
+
 app :: Application
 app req = case pathInfo req of
     ("irc-send":_) -> ircIn req
@@ -85,6 +90,14 @@ ircOut req = do
     then return $ res $ T.encodeUtf8 html
     else return $ res "Error - no nickname provided!"
   where
+    appendTime x (acc, (ot, n)) =
+        let cls = T.split (== '\t') x
+            mct = atMay 0 cls
+            ct = maybe "" id mct
+            n' = if ot == ct && ct /= "" then succ n else n
+            ctn = ct <> T.cons '-' (T.pack $ show n')
+            x' = T.intercalate "\t" $ ctn : drop 1 cls
+        in (x' : acc, (ct, n'))
     dropEmpty = dropWhile (== mempty)
     mkLine x = "<span class=line>" <> mkCons x <> "</span>"
     wrap = zipWith (\x y -> "<span class=" <> x <> ">" <> y <> "</span>")
