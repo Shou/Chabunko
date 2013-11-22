@@ -291,6 +291,13 @@ function prepareLine(line){
     var ni = line.children[1]
     var ms = line.children[2]
 
+    // Display user nick
+    if (ni.textContent === "Chabunko") {
+        var msp = ms.innerHTML.split(": ")
+        ms.innerHTML = msp.slice(1).join(": ")
+        ni.textContent = msp[0]
+    }
+
     // Nick coloring
     if ("%nick" !== nickOnly(ni.textContent))
         ni.style.color = nickColor(nickOnly(ni.textContent))
