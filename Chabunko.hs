@@ -90,6 +90,17 @@ colorOf n = pack $ colors !! (sum (map ord snick) `mod` length colors)
 
 type MApplication = Request -> MVar Text -> ResourceT IO Response
 
+appendTime :: Text -> ([Text], (Text, Integer))
+           -> ([Text], (Text, Integer))
+appendTime x (acc, (ot, n)) =
+  let cls = T.split (== '\t') x
+      mct = atMay 0 cls
+      ct = fromMaybe mempty mct
+      n' = if ot == ct && ct /= "" then succ n else 0
+      ctn = ct <> T.cons '-' (T.pack $ show n')
+      x' = T.intercalate "\t" $ ctn : drop 1 cls
+  in (x' : acc, (ct, n'))
+
 app :: MApplication
 app req mvar = case pathInfo req of
     ("irc-send":_) -> ircIn req mvar
@@ -113,20 +124,10 @@ ircOut req = do
         query = map conv $ queryString req
         def' = ("html", ps) : query <> def
         html = format base def'
-    if isJust $ lookup "nick" query
-    then return $ res $ T.encodeUtf8 html
-    else return $ res "Error - no nickname provided!"
+    return . res $ if isJust $ lookup "nick" query
+                   then T.encodeUtf8 html
+                   else "Error - no nickname provided!"
   where
-    appendTime :: Text -> ([Text], (Text, Integer))
-               -> ([Text], (Text, Integer))
-    appendTime x (acc, (ot, n)) =
-        let cls = T.split (== '\t') x
-            mct = atMay 0 cls
-            ct = maybe "" id mct
-            n' = if ot == ct && ct /= "" then succ n else 0
-            ctn = ct <> T.cons '-' (T.pack $ show n')
-            x' = T.intercalate "\t" $ ctn : drop 1 cls
-        in (x' : acc, (ct, n'))
     appendTimes = fst . foldr appendTime (mempty, ("", 0))
     dropEmpty = dropWhile (== mempty)
     mkLine x = "<span class=line>" <> mkCons x <> "</span>"
@@ -155,19 +156,10 @@ ircNew req = do
         time = maybe "" T.decodeUtf8 mtime
         ps = T.unlines . reverse . take 100 . map mkLine . dropOld time $ appendTimes ls
         query = map conv $ queryString req
-    if isJust $ lookup "nick" query
-    then return $ res $ T.encodeUtf8 ps
-    else return $ res "Error - no nickname provided!"
+    return . res $ if isJust $ lookup "nick" query
+                   then T.encodeUtf8 ps
+                   else "Error - no nickname provided!"
   where
-    appendTime :: Text -> ([Text], (Text, Integer)) -> ([Text], (Text, Integer))
-    appendTime x (acc, (ot, n)) =
-        let cls = T.split (== '\t') x
-            mct = atMay 0 cls
-            ct = maybe "" id mct
-            n' = if ot == ct && ct /= "" then succ n else 0
-            ctn = ct <> T.cons '-' (T.pack $ show n')
-            x' = T.intercalate "\t" $ ctn : drop 1 cls
-        in (x' : acc, (ct, n'))
     appendTimes = fst . foldr appendTime (mempty, ("", 0))
     dropEmpty = dropWhile (== mempty)
     dropOld time = filter ((time <) . head . T.split (== '\t'))
@@ -222,11 +214,14 @@ res t = ResponseBuilder
 
 -- This is silly, it produces ["", ""] on
 -- let x = "foo" in splits x (T.pack x)
-splits :: [Char] -> Text -> [Text]
+-- | Splits input text on every character provided.
+splits :: String -- ^ Characters to split on
+          -> Text -- ^ Text to split
+          -> [Text]
 splits [] t = [t]
 splits (c:cs) t = splits' cs $ T.split (==c) t
   where
-    splits' :: [Char] -> [Text] -> [Text]
+    splits' :: String -> [Text] -> [Text]
     splits' [] ts = ts
     splits' (c':cs') ts = splits' cs' . concat $ map (T.split (==c')) ts
 
@@ -237,7 +232,7 @@ listen :: Handle -> IO ()
 listen h = forever $ do
     line <- T.hGetLine h
     case () of
-      _ | T.take 4 line == "PING" -> write h $ "PONG" `T.append` (T.drop 4 line)
+      _ | T.take 4 line == "PING" -> write h $ "PONG" `T.append` T.drop 4 line
         | otherwise -> do
             let lineSplit = T.split (== ':') line
                 msg = T.intercalate ":" $ drop 2 lineSplit
@@ -265,4 +260,4 @@ runIRC mvar = do
 main :: IO ()
 main = do
   m <- newEmptyMVar
-  runIRC m >> runSettings settings (flip app m)
+  runIRC m >> runSettings settings (`app` m)
