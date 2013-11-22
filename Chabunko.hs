@@ -37,8 +37,8 @@ import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Trans
 
+import Data.ByteString (ByteString)
 import Data.Char (ord)
-import Data.Conduit.Internal (ConduitM (..))
 import Data.Maybe
 import Data.Monoid
 import Data.Text (Text)
@@ -50,11 +50,9 @@ import Network
 import Network.HTTP.Types
 import Network.Wai
 import Network.Wai.Handler.Warp hiding (Handle)
-import Network.Wai.Parse
 
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
-
 -- }}}
 
 
@@ -80,14 +78,16 @@ mvar = unsafePerformIO newEmptyMVar
 atMay :: Int -> [a] -> Maybe a
 atMay _ [] = Nothing
 atMay 0 (x:_) = Just x
-atMay n (x:xs) = atMay (pred n) xs
+atMay n (_:xs) = atMay (pred n) xs
 
-colorize nick = "\ETX" <> colorOf nick <> nick <> "\ETX"
+colorize :: ByteString -> ByteString
+colorize n = "\ETX" <> colorOf n <> n <> "\ETX"
 
-colorOf nick = pack $ colors !! (sum (map ord snick) `mod` length colors)
+colorOf :: ByteString -> ByteString
+colorOf n = pack $ colors !! (sum (map ord snick) `mod` length colors)
   where
     pack = T.encodeUtf8 . T.pack
-    snick = T.unpack $ T.decodeUtf8 nick
+    snick = T.unpack $ T.decodeUtf8 n
     colors =
         [ "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13"
         ]
@@ -100,10 +100,12 @@ app req = case pathInfo req of
     _ -> return $ res "Who are you?!?!? are you food!!!"
 
 -- UGUU!!!
+ircRes :: MonadIO m => Request -> m Response
 ircRes req = case requestMethod req of
     "GET" -> ircOut req
     "POST" -> ircIn req
 
+ircOut :: MonadIO m => Request -> m Response
 ircOut req = do
     liftIO $ print $ queryString req
     base <- liftIO $ T.readFile "base.html"
@@ -134,6 +136,7 @@ ircOut req = do
 
 -- sink = Sink
 -- parseRequestBody sink req
+ircIn :: MonadIO m => Request -> m Response
 ircIn req = do
     liftIO $ print $ queryString req
     let mnick = join $ lookup "nick" $ queryString req
@@ -145,6 +148,7 @@ ircIn req = do
         return $ res "You posted!"
     else return $ res "Error - no nickname provided!"
 
+ircNew :: MonadIO m => Request -> m Response
 ircNew req = do
     liftIO $ print $ queryString req
     ls <- liftIO $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
@@ -156,6 +160,7 @@ ircNew req = do
     then return $ res $ T.encodeUtf8 ps
     else return $ res "Error - no nickname provided!"
   where
+    appendTime :: Text -> ([Text], (Text, Integer)) -> ([Text], (Text, Integer))
     appendTime x (acc, (ot, n)) =
         let cls = T.split (== '\t') x
             mct = atMay 0 cls
@@ -172,6 +177,7 @@ ircNew req = do
     mkCons x = T.unwords $ wrap ["timestamp", "nick", "message"] (T.split (== '\t') x)
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
 
+def :: [(Text, Text)]
 def = [ ("bg", "#fcfcfc")
       , ("fg", "#101010")
       , ("link", "blue")
@@ -204,16 +210,18 @@ def = [ ("bg", "#fcfcfc")
       , ("css", "")
       ]
 
+format :: Text -> [(Text, Text)] -> Text
 format t [] = t
 format t ((k, v) : xs) = format (T.replace ("%" <> k) v t) xs
 
 --res :: Response
+res :: ByteString -> Response
 res t = ResponseBuilder
     ok200
     [ ( "Content-Type", "text/html; charset=utf-8" )
     ] $ fromByteString t
 
-splits :: [Char] -> T.Text -> [T.Text]
+splits :: [Char] -> Text -> [Text]
 splits (c:cs) t = splits' cs $ T.split (==c) t
   where
     splits' :: [Char] -> [T.Text] -> [T.Text]
@@ -243,8 +251,8 @@ runIRC = do
     write h $ "NICK " `T.append` nick
     write h $ "USER " `T.append` nick `T.append` " 0 * :" `T.append` nick
     forM_ channels $ write h . ("JOIN " <>)
-    forkIO . forever $ userInput h
-    forkIO . forever $ takeMVar mvar >>= write h . ("PRIVMSG #bnetmlp :" <>)
+    _ <- forkIO . forever $ userInput h
+    _ <- forkIO . forever $ takeMVar mvar >>= write h . ("PRIVMSG #bnetmlp :" <>)
     void . forkIO $ listen h
   where
     userInput h = do
