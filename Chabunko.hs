@@ -27,34 +27,30 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 
--- {{{ Imports
+import           Blaze.ByteString.Builder.ByteString (fromByteString)
 
-import Blaze.ByteString.Builder.ByteString (fromByteString)
+import           Control.Applicative
+import           Control.Concurrent                  (forkIO)
+import           Control.Concurrent.MVar
+import           Control.Monad
+import           Control.Monad.Trans
+import           Control.Monad.Trans.Resource
 
-import Control.Applicative
-import Control.Concurrent (forkIO)
-import Control.Concurrent.MVar
-import Control.Monad
-import Control.Monad.Trans
-import Control.Monad.Trans.Resource
+import           Data.ByteString                     (ByteString)
+import           Data.Char                           (ord)
+import           Data.Maybe
+import           Data.Monoid
+import           Data.Text                           (Text)
+import qualified Data.Text                           as T
+import qualified Data.Text.Encoding                  as T
+import qualified Data.Text.IO                        as T
 
-import Data.ByteString (ByteString)
-import Data.Char (ord)
-import Data.Maybe
-import Data.Monoid
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Text.Encoding as T
+import           Network
+import           Network.HTTP.Types
+import           Network.Wai
+import           Network.Wai.Handler.Warp            hiding (Handle)
 
-import Network
-import Network.HTTP.Types
-import Network.Wai
-import Network.Wai.Handler.Warp hiding (Handle)
-
-import System.IO
--- }}}
-
+import           System.IO
 
 settings :: Settings
 settings = defaultSettings { settingsPort = 8088 }
