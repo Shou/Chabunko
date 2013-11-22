@@ -129,10 +129,10 @@ var colors =
     }
 
 var colorints =
-    { white: "00", black: "01", blue: "02", green: "03", red: "04"
-    , darkred: "05", darkmagenta: "06", orange: "07", yellow: "08"
-    , lightgreen: "09", cyan: "10", lightcyan: "11", darkblue: "12"
-    , magenta: "13", gray: "14", lightgray: "15"
+    { "00": "white", "01": "black", "02": "blue", "03": "green", "04": "red"
+    , "05": "darkred", "06": "darkmagenta", "07": "orange", "08": "yellow"
+    , "09": "lightgreen", "10": "cyan", "11": "lightcyan", "12": "darkblue"
+    , "13": "magenta", "14": "gray", "15": "lightgray"
     }
 
 // flash :: String -> IO ()
@@ -231,6 +231,15 @@ function embed(url){
     return la + mid + ra
 }
 
+function colorize(co){
+    co = co.replace(/\u0003/g, "")
+    co = co.length < 2 ? '0' + co : co
+
+    console.log(colors[colorints[co]] + " : " + co)
+
+    return "<span style=color:" + colors[colorints[co]] + ">"
+}
+
 // addNew :: String -> IO ()
 function addNew(html){
     console.log(html)
@@ -266,7 +275,8 @@ function prepareLine(line){
     // URLs and embedding
     ms.innerHTML = ms.innerHTML.replace(/https?:\/\/\S+/i, embed)
 
-    // 
+    // Coloring
+    ms.innerHTML = ms.innerHTML.replace(/\u0003([0-1][0-6]|\d)/g, colorize)
 
     // XXX only highlight nick?
     // Word highlighting

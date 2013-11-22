@@ -82,7 +82,7 @@ ircOut req = do
     liftIO $ print $ queryString req
     base <- liftIO $ T.readFile "base.html"
     ls <- liftIO $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
-    let ps = T.unlines . reverse . take 100 $ map mkLine ls
+    let ps = T.unlines . reverse . map mkLine . appendTimes $ take 100 ls
         query = map conv $ queryString req
         def' = ("html", ps) : query <> def
         html = format base def'
@@ -94,10 +94,11 @@ ircOut req = do
         let cls = T.split (== '\t') x
             mct = atMay 0 cls
             ct = maybe "" id mct
-            n' = if ot == ct && ct /= "" then succ n else n
+            n' = if ot == ct && ct /= "" then succ n else 0
             ctn = ct <> T.cons '-' (T.pack $ show n')
             x' = T.intercalate "\t" $ ctn : drop 1 cls
         in (x' : acc, (ct, n'))
+    appendTimes = fst . foldr appendTime (mempty, ("", 0))
     dropEmpty = dropWhile (== mempty)
     mkLine x = "<span class=line>" <> mkCons x <> "</span>"
     wrap = zipWith (\x y -> "<span class=" <> x <> ">" <> y <> "</span>")
@@ -122,14 +123,23 @@ ircNew req = do
     ls <- liftIO $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
     let mtime = join $ lookup "time" $ queryString req
         time = maybe "" T.decodeUtf8 mtime
-        ps = T.unlines . reverse . take 100 . map mkLine $ dropOld time ls
+        ps = T.unlines . reverse . take 100 . map mkLine . dropOld time $ appendTimes ls
         query = map conv $ queryString req
     if isJust $ lookup "nick" query
     then return $ res $ T.encodeUtf8 ps
     else return $ res "Error - no nickname provided!"
   where
+    appendTime x (acc, (ot, n)) =
+        let cls = T.split (== '\t') x
+            mct = atMay 0 cls
+            ct = maybe "" id mct
+            n' = if ot == ct && ct /= "" then succ n else 0
+            ctn = ct <> T.cons '-' (T.pack $ show n')
+            x' = T.intercalate "\t" $ ctn : drop 1 cls
+        in (x' : acc, (ct, n'))
+    appendTimes = fst . foldr appendTime (mempty, ("", 0))
     dropEmpty = dropWhile (== mempty)
-    dropOld time = filter ((time <=) . head . T.split (== '\t'))
+    dropOld time = filter ((time <) . head . T.split (== '\t'))
     mkLine x = "<span class=line>" <> mkCons x <> "</span>"
     wrap = zipWith (\x y -> "<span class=" <> x <> ">" <> y <> "</span>")
     mkCons x = T.unwords $ wrap ["timestamp", "nick", "message"] (T.split (== '\t') x)
@@ -216,5 +226,5 @@ runIRC = do
 
 
 main :: IO ()
-main = runIRC >> runSettings settings app
+main = runSettings settings app
 
