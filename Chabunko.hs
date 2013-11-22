@@ -1,6 +1,18 @@
+-- Copyright (C) 2013  Shou
 
--- Copyright Shou, 2013
--- Licensed under the GNU GPLv2
+-- This program is free software; you can redistribute it and/or
+-- modify it under the terms of the GNU General Public License
+-- as published by the Free Software Foundation; either version 2
+-- of the License, or (at your option) any later version.
+
+-- This program is distributed in the hope that it will be useful,
+-- but WITHOUT ANY WARRANTY; without even the implied warranty of
+-- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-- GNU General Public License for more details.
+
+-- You should have received a copy of the GNU General Public License
+-- along with this program; if not, write to the Free Software
+-- Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 -- TODO
 --  - Separate metadata file per user
@@ -15,36 +27,30 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 
--- {{{ Imports
+import           Blaze.ByteString.Builder.ByteString (fromByteString)
 
-import Blaze.ByteString.Builder.ByteString (fromByteString)
+import           Control.Applicative
+import           Control.Concurrent                  (forkIO)
+import           Control.Concurrent.MVar
+import           Control.Monad
+import           Control.Monad.Trans
+import           Control.Monad.Trans.Resource
 
-import Control.Applicative
-import Control.Concurrent (forkIO)
-import Control.Concurrent.MVar
-import Control.Monad
-import Control.Monad.Trans
+import           Data.ByteString                     (ByteString)
+import           Data.Char                           (ord)
+import           Data.Maybe
+import           Data.Monoid
+import           Data.Text                           (Text)
+import qualified Data.Text                           as T
+import qualified Data.Text.Encoding                  as T
+import qualified Data.Text.IO                        as T
 
-import Data.Char (ord)
-import Data.Conduit.Internal (ConduitM (..))
-import Data.Maybe
-import Data.Monoid
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Text.Encoding as T
+import           Network
+import           Network.HTTP.Types
+import           Network.Wai
+import           Network.Wai.Handler.Warp            hiding (Handle)
 
-import Network
-import Network.HTTP.Types
-import Network.Wai
-import Network.Wai.Handler.Warp hiding (Handle)
-import Network.Wai.Parse
-
-import System.IO
-import System.IO.Unsafe (unsafePerformIO)
-
--- }}}
-
+import           System.IO
 
 settings :: Settings
 settings = defaultSettings { settingsPort = 8088 }
@@ -61,37 +67,51 @@ nick = "Chabunko"
 channels :: [Text]
 channels = ["#bnetmlp"]
 
-mvar :: MVar Text
-mvar = unsafePerformIO newEmptyMVar
-
-
 atMay :: Int -> [a] -> Maybe a
 atMay _ [] = Nothing
 atMay 0 (x:_) = Just x
-atMay n (x:xs) = atMay (pred n) xs
+atMay n (_:xs) = atMay (pred n) xs
 
-colorize nick = "\ETX" <> colorOf nick <> nick <> "\ETX"
+colorize :: ByteString -> ByteString
+colorize n = "\ETX" <> colorOf n <> n <> "\ETX"
 
-colorOf nick = pack $ colors !! (sum (map ord snick) `mod` length colors)
+colorOf :: ByteString -> ByteString
+colorOf n = pack $ colors !! (sum (map ord snick) `mod` length colors)
   where
     pack = T.encodeUtf8 . T.pack
-    snick = T.unpack $ T.decodeUtf8 nick
+    snick = T.unpack $ T.decodeUtf8 n
     colors =
         [ "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13"
         ]
 
-app :: Application
-app req = case pathInfo req of
-    ("irc-send":_) -> ircIn req
+type MApplication = Request -> MVar Text -> ResourceT IO Response
+
+appendTime :: Text -> ([Text], (Text, Integer))
+           -> ([Text], (Text, Integer))
+appendTime x (acc, (ot, n)) =
+  let cls = T.split (== '\t') x
+      mct = atMay 0 cls
+      ct = fromMaybe mempty mct
+      n' = if ot == ct && ct /= "" then succ n else 0
+      ctn = ct <> T.cons '-' (T.pack $ show n')
+      x' = T.intercalate "\t" $ ctn : drop 1 cls
+  in (x' : acc, (ct, n'))
+
+app :: MApplication
+app req mvar = case pathInfo req of
+    ("irc-send":_) -> ircIn req mvar
     ("irc-new":_) -> ircNew req
     ("irc":_) -> ircOut req
     _ -> return $ res "Who are you?!?!? are you food!!!"
 
 -- UGUU!!!
-ircRes req = case requestMethod req of
-    "GET" -> ircOut req
-    "POST" -> ircIn req
+ircRes :: MonadIO m => Request -> MVar Text -> Maybe (m Response)
+ircRes req mvar = case requestMethod req of
+    "GET" -> Just $ ircOut req
+    "POST" -> Just $ ircIn req mvar
+    _ -> Nothing
 
+ircOut :: MonadIO m => Request -> m Response
 ircOut req = do
     liftIO $ print $ queryString req
     base <- liftIO $ T.readFile "base.html"
@@ -100,18 +120,10 @@ ircOut req = do
         query = map conv $ queryString req
         def' = ("html", ps) : query <> def
         html = format base def'
-    if isJust $ lookup "nick" query
-    then return $ res $ T.encodeUtf8 html
-    else return $ res "Error - no nickname provided!"
+    return . res $ if isJust $ lookup "nick" query
+                   then T.encodeUtf8 html
+                   else "Error - no nickname provided!"
   where
-    appendTime x (acc, (ot, n)) =
-        let cls = T.split (== '\t') x
-            mct = atMay 0 cls
-            ct = maybe "" id mct
-            n' = if ot == ct && ct /= "" then succ n else 0
-            ctn = ct <> T.cons '-' (T.pack $ show n')
-            x' = T.intercalate "\t" $ ctn : drop 1 cls
-        in (x' : acc, (ct, n'))
     appendTimes = fst . foldr appendTime (mempty, ("", 0))
     dropEmpty = dropWhile (== mempty)
     mkLine x = "<span class=line>" <> mkCons x <> "</span>"
@@ -120,19 +132,19 @@ ircOut req = do
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
     esc = T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "&" "&amp;"
 
--- sink = Sink 
--- parseRequestBody sink req
-ircIn req = do
+ircIn :: MonadIO m => Request -> MVar Text -> m Response
+ircIn req mvar = do
     liftIO $ print $ queryString req
     let mnick = join $ lookup "nick" $ queryString req
         mmsg = join $ lookup "msg" $ queryString req
         mfull = (\x y -> colorize x <> ": " <> y) <$> mnick <*> mmsg
     if isJust $ lookup "nick" $ queryString req
-    then do
+      then do
         liftIO $ maybe (return ()) (putMVar mvar . T.decodeUtf8) mfull
         return $ res "You posted!"
-    else return $ res "Error - no nickname provided!"
+      else return $ res "Error - no nickname provided!"
 
+ircNew :: MonadIO m => Request -> m Response
 ircNew req = do
     liftIO $ print $ queryString req
     ls <- liftIO $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
@@ -140,18 +152,10 @@ ircNew req = do
         time = maybe "" T.decodeUtf8 mtime
         ps = T.unlines . reverse . take 100 . map mkLine . dropOld time $ appendTimes ls
         query = map conv $ queryString req
-    if isJust $ lookup "nick" query
-    then return $ res $ T.encodeUtf8 ps
-    else return $ res "Error - no nickname provided!"
+    return . res $ if isJust $ lookup "nick" query
+                   then T.encodeUtf8 ps
+                   else "Error - no nickname provided!"
   where
-    appendTime x (acc, (ot, n)) =
-        let cls = T.split (== '\t') x
-            mct = atMay 0 cls
-            ct = maybe "" id mct
-            n' = if ot == ct && ct /= "" then succ n else 0
-            ctn = ct <> T.cons '-' (T.pack $ show n')
-            x' = T.intercalate "\t" $ ctn : drop 1 cls
-        in (x' : acc, (ct, n'))
     appendTimes = fst . foldr appendTime (mempty, ("", 0))
     dropEmpty = dropWhile (== mempty)
     dropOld time = filter ((time <) . head . T.split (== '\t'))
@@ -160,6 +164,7 @@ ircNew req = do
     mkCons x = T.unwords $ wrap ["timestamp", "nick", "message"] (T.split (== '\t') x)
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
 
+def :: [(Text, Text)]
 def = [ ("bg", "#fcfcfc")
       , ("fg", "#101010")
       , ("link", "blue")
@@ -192,19 +197,27 @@ def = [ ("bg", "#fcfcfc")
       , ("css", "")
       ]
 
+format :: Text -> [(Text, Text)] -> Text
 format t [] = t
 format t ((k, v) : xs) = format (T.replace ("%" <> k) v t) xs
 
 --res :: Response
+res :: ByteString -> Response
 res t = ResponseBuilder
     ok200
     [ ( "Content-Type", "text/html; charset=utf-8" )
     ] $ fromByteString t
 
-splits :: [Char] -> T.Text -> [T.Text]
+-- This is silly, it produces ["", ""] on
+-- let x = "foo" in splits x (T.pack x)
+-- | Splits input text on every character provided.
+splits :: String -- ^ Characters to split on
+          -> Text -- ^ Text to split
+          -> [Text]
+splits [] t = [t]
 splits (c:cs) t = splits' cs $ T.split (==c) t
   where
-    splits' :: [Char] -> [T.Text] -> [T.Text]
+    splits' :: String -> [Text] -> [Text]
     splits' [] ts = ts
     splits' (c':cs') ts = splits' cs' . concat $ map (T.split (==c')) ts
 
@@ -215,15 +228,15 @@ listen :: Handle -> IO ()
 listen h = forever $ do
     line <- T.hGetLine h
     case () of
-      _ | T.take 4 line == "PING" -> write h $ "PONG" `T.append` (T.drop 4 line)
+      _ | T.take 4 line == "PING" -> write h $ "PONG" `T.append` T.drop 4 line
         | otherwise -> do
             let lineSplit = T.split (== ':') line
                 msg = T.intercalate ":" $ drop 2 lineSplit
                 args = splits "!@ " . T.intercalate ":" $ take 2 lineSplit
             T.putStrLn $ (T.pack . show $ args) `T.append` T.cons ' ' msg
 
-runIRC :: IO ()
-runIRC = do
+runIRC :: MVar Text -> IO ()
+runIRC mvar = do
     h <- connectTo server (PortNumber $ fromIntegral port)
     hSetEncoding h utf8
     hSetBuffering h LineBuffering
@@ -231,8 +244,8 @@ runIRC = do
     write h $ "NICK " `T.append` nick
     write h $ "USER " `T.append` nick `T.append` " 0 * :" `T.append` nick
     forM_ channels $ write h . ("JOIN " <>)
-    forkIO . forever $ userInput h
-    forkIO . forever $ takeMVar mvar >>= write h . ("PRIVMSG #bnetmlp :" <>)
+    _ <- forkIO . forever $ userInput h
+    _ <- forkIO . forever $ takeMVar mvar >>= write h . ("PRIVMSG #bnetmlp :" <>)
     void . forkIO $ listen h
   where
     userInput h = do
@@ -241,5 +254,6 @@ runIRC = do
 
 
 main :: IO ()
-main = runIRC >> runSettings settings app
-
+main = do
+  m <- newEmptyMVar
+  runIRC m >> runSettings settings (`app` m)
