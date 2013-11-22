@@ -104,7 +104,7 @@ span.line > .message
 
 .embed
     { max-height: 64px
-    ; max-width: auto
+    ; max-width: 100%
     ; display: block
     }
 
@@ -295,6 +295,10 @@ function prepareLine(line){
     if ("%nick" !== nickOnly(ni.textContent))
         ni.style.color = nickColor(nickOnly(ni.textContent))
     else ni.style.color = "%self"
+
+    // Nick max length
+    if (ni.textContent.length > 10)
+        ni.textContent = ni.textContent.substr(0, 10) + "…"
 
     // URLs and embedding
     ms.innerHTML = ms.innerHTML.replace(/https?:\/\/\S+/ig, embed)
