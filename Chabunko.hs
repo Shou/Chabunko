@@ -98,10 +98,11 @@ app req mvar = case pathInfo req of
     _ -> return $ res "Who are you?!?!? are you food!!!"
 
 -- UGUU!!!
-ircRes :: MonadIO m => Request -> MVar Text -> m Response
+ircRes :: MonadIO m => Request -> MVar Text -> Maybe (m Response)
 ircRes req mvar = case requestMethod req of
-    "GET" -> ircOut req
-    "POST" -> ircIn req mvar
+    "GET" -> Just $ ircOut req
+    "POST" -> Just $ ircIn req mvar
+    _ -> Nothing
 
 ircOut :: MonadIO m => Request -> m Response
 ircOut req = do
@@ -219,10 +220,13 @@ res t = ResponseBuilder
     [ ( "Content-Type", "text/html; charset=utf-8" )
     ] $ fromByteString t
 
+-- This is silly, it produces ["", ""] on
+-- let x = "foo" in splits x (T.pack x)
 splits :: [Char] -> Text -> [Text]
+splits [] t = [t]
 splits (c:cs) t = splits' cs $ T.split (==c) t
   where
-    splits' :: [Char] -> [T.Text] -> [T.Text]
+    splits' :: [Char] -> [Text] -> [Text]
     splits' [] ts = ts
     splits' (c':cs') ts = splits' cs' . concat $ map (T.split (==c')) ts
 
