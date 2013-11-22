@@ -304,7 +304,7 @@ function prepareLine(line){
     ms.innerHTML = ms.innerHTML.replace(/https?:\/\/\S+/ig, embed)
 
     // Coloring
-    ms.innerHTML = ms.innerHTML.replace(/\u0003([0-1][0-6]|\d)(,([0-1][0-6]|[0-9]))?/g, colorize)
+    ms.innerHTML = ms.innerHTML.replace(/\u0003(1[0-6]|0?\d)(,(1[0-6]|0?\d))?/g, colorize)
 
     // XXX only highlight nick?
     // Word highlighting
@@ -332,7 +332,8 @@ function main(){
     var inp = document.getElementById("input")
 
     document.body.addEventListener("keyup", function(e){
-        if (e.keyCode >= 32 || e.keyCode == 8) {
+        if (e.ctrlKey || e.altKey);
+        else if (e.keyCode >= 32 || e.keyCode == 8) {
             e.stopPropagation()
             inp.focus()
             inp.value += String.fromCharCode(e.keyCode)

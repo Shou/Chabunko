@@ -70,7 +70,7 @@ atMay _ [] = Nothing
 atMay 0 (x:_) = Just x
 atMay n (x:xs) = atMay (pred n) xs
 
-colorize nick = "\ETX" <> colorOf nick <> nick "\ETX"
+colorize nick = "\ETX" <> colorOf nick <> nick <> "\ETX"
 
 colorOf nick = pack $ colors !! (sum (map ord snick) `mod` length colors)
   where
