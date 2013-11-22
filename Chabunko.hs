@@ -52,7 +52,6 @@ import Network.Wai
 import Network.Wai.Handler.Warp hiding (Handle)
 
 import System.IO
-import System.IO.Unsafe (unsafePerformIO)
 -- }}}
 
 
@@ -71,8 +70,8 @@ nick = "Chabunko"
 channels :: [Text]
 channels = ["#bnetmlp"]
 
-mvar :: MVar Text
-mvar = unsafePerformIO newEmptyMVar
+mvar :: IO (MVar Text)
+mvar = newEmptyMVar
 
 
 atMay :: Int -> [a] -> Maybe a
@@ -143,10 +142,11 @@ ircIn req = do
         mmsg = join $ lookup "msg" $ queryString req
         mfull = (\x y -> colorize x <> ": " <> y) <$> mnick <*> mmsg
     if isJust $ lookup "nick" $ queryString req
-    then do
-        liftIO $ maybe (return ()) (putMVar mvar . T.decodeUtf8) mfull
+      then do
+        m <- liftIO mvar
+        liftIO $ maybe (return ()) (putMVar m . T.decodeUtf8) mfull
         return $ res "You posted!"
-    else return $ res "Error - no nickname provided!"
+      else return $ res "Error - no nickname provided!"
 
 ircNew :: MonadIO m => Request -> m Response
 ircNew req = do
@@ -252,7 +252,8 @@ runIRC = do
     write h $ "USER " `T.append` nick `T.append` " 0 * :" `T.append` nick
     forM_ channels $ write h . ("JOIN " <>)
     _ <- forkIO . forever $ userInput h
-    _ <- forkIO . forever $ takeMVar mvar >>= write h . ("PRIVMSG #bnetmlp :" <>)
+    m <- mvar
+    _ <- forkIO . forever $ takeMVar m >>= write h . ("PRIVMSG #bnetmlp :" <>)
     void . forkIO $ listen h
   where
     userInput h = do
