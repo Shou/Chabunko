@@ -5,9 +5,12 @@
 -- TODO
 --  - Separate metadata file per user
 --      - Set avatars
+--      - Custom nick colors
 --      - We can do anything!
 --  - Flood control!!
 --      - Send three messages per second only???
+--  - Timestamp as name or value attribute or something!
+--  - Improved highlighting
 
 
 {-# LANGUAGE OverloadedStrings #-}
@@ -22,6 +25,7 @@ import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Trans
 
+import Data.Char (ord)
 import Data.Conduit.Internal (ConduitM (..))
 import Data.Maybe
 import Data.Monoid
@@ -66,6 +70,16 @@ atMay _ [] = Nothing
 atMay 0 (x:_) = Just x
 atMay n (x:xs) = atMay (pred n) xs
 
+colorize nick = "\ETX" <> colorOf nick <> nick
+
+colorOf nick = pack $ colors !! (sum (map ord snick) `mod` length colors)
+  where
+    pack = T.encodeUtf8 . T.pack
+    snick = T.unpack $ T.decodeUtf8 nick
+    colors =
+        [ "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13"
+        ]
+
 app :: Application
 app req = case pathInfo req of
     ("irc-send":_) -> ircIn req
@@ -101,9 +115,10 @@ ircOut req = do
     appendTimes = fst . foldr appendTime (mempty, ("", 0))
     dropEmpty = dropWhile (== mempty)
     mkLine x = "<span class=line>" <> mkCons x <> "</span>"
-    wrap = zipWith (\x y -> "<span class=" <> x <> ">" <> y <> "</span>")
+    wrap = zipWith (\x y -> "<span class=" <> x <> ">" <> esc y <> "</span>")
     mkCons x = T.unwords $ wrap ["timestamp", "nick", "message"] (T.split (== '\t') x)
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
+    esc = T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "&" "&amp;"
 
 -- sink = Sink 
 -- parseRequestBody sink req
@@ -111,7 +126,7 @@ ircIn req = do
     liftIO $ print $ queryString req
     let mnick = join $ lookup "nick" $ queryString req
         mmsg = join $ lookup "msg" $ queryString req
-        mfull = (\x y -> x <> ": " <> y) <$> mnick <*> mmsg
+        mfull = (\x y -> colorize x <> ": " <> y) <$> mnick <*> mmsg
     if isJust $ lookup "nick" $ queryString req
     then do
         liftIO $ maybe (return ()) (putMVar mvar . T.decodeUtf8) mfull
@@ -226,5 +241,5 @@ runIRC = do
 
 
 main :: IO ()
-main = runSettings settings app
+main = runIRC >> runSettings settings app
 

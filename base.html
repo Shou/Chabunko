@@ -188,6 +188,7 @@ function loadNew(time){
     xhr.send()
 }
 
+// nickColor :: String -> String
 function nickColor(name){
     var rcolors = [ colors["blue"], colors["green"], colors["red"]
                   , colors["darkred"], colors["darkmagenta"], colors["orange"]
@@ -205,10 +206,12 @@ function nickColor(name){
     return rcolors[sum]
 }
 
+// nickOnly :: String -> String
 function nickOnly(name){
     return name.replace(/^[~&@%+]/, "")
 }
 
+// embed :: String -> String
 function embed(url){
     var la = "<a target=_blank href=" + url + ">"
     var mid = url
@@ -231,13 +234,34 @@ function embed(url){
     return la + mid + ra
 }
 
+// pad :: String -> String
+function pad(xs){
+    return xs.length < 2 ? '0' + xs : xs
+}
+
+// colorize :: String -> String
 function colorize(co){
+    var fg = ""
+    var bg = ""
+
     co = co.replace(/\u0003/g, "")
-    co = co.length < 2 ? '0' + co : co
 
-    console.log(colors[colorints[co]] + " : " + co)
+    if (co.match(",")) {
+        fg = colors[colorints[pad(co.split(',')[0])]]
+        bg = colors[colorints[pad(co.split(',')[1])]]
 
-    return "<span style=color:" + colors[colorints[co]] + ">"
+    } else fg = colors[colorints[pad(co)]]
+
+    return "<span style=color:" + fg + ";background-color:" + bg + ">"
+}
+
+function action(msg){
+    if (msg.match(/^\/me /i))
+        msg = msg.replace("/me", "\u000305♥\u0003 "
+                               + nick
+                               + msg.replace(/^\/me/i, ""))
+
+    return msg
 }
 
 // addNew :: String -> IO ()
@@ -273,16 +297,23 @@ function prepareLine(line){
     else ni.style.color = "%self"
 
     // URLs and embedding
-    ms.innerHTML = ms.innerHTML.replace(/https?:\/\/\S+/i, embed)
+    ms.innerHTML = ms.innerHTML.replace(/https?:\/\/\S+/ig, embed)
 
     // Coloring
-    ms.innerHTML = ms.innerHTML.replace(/\u0003([0-1][0-6]|\d)/g, colorize)
+    ms.innerHTML = ms.innerHTML.replace(/\u0003([0-1][0-6]|\d)(,([0-1][0-6]|[0-9]))?/g, colorize)
 
     // XXX only highlight nick?
     // Word highlighting
     if (ms.textContent.match(RegExp(nick, 'i'))) {
         console.log("Highlight: " + nick)
         ms.className += " highlight"
+    }
+
+    if (ms.innerHTML.match(/^\u0001ACTION/)) {
+        var nii = ni.cloneNode()
+        nii.className = ""
+        ms.innerHTML = ms.innerHTML.replace(/^\u0001ACTION/, nii.outerHTML)
+        ni.innerHTML = "<span style=color:" + colors["red"] + ">♥</span>"
     }
 }
 
@@ -299,13 +330,14 @@ function main(){
     document.body.addEventListener("keyup", function(e){
         if (e.keyCode >= 32 || e.keyCode == 8) {
             e.stopPropagation()
-            inp.value += String.fromCharCode(e.keyCode)
             inp.focus()
+            inp.value += String.fromCharCode(e.keyCode)
         }
     })
     inp.addEventListener("keyup", function(e){
         e.stopPropagation()
-        if (e.keyCode === 13) submit(this.value)
+        if (e.keyCode === 13)
+            submit(this.value)
     })
 
     var snick = document.getElementById("self")
