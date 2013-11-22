@@ -117,6 +117,8 @@ ircOut req = do
     then return $ res $ T.encodeUtf8 html
     else return $ res "Error - no nickname provided!"
   where
+    appendTime :: Text -> ([Text], (Text, Integer))
+               -> ([Text], (Text, Integer))
     appendTime x (acc, (ot, n)) =
         let cls = T.split (== '\t') x
             mct = atMay 0 cls
@@ -133,8 +135,6 @@ ircOut req = do
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
     esc = T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "&" "&amp;"
 
--- sink = Sink
--- parseRequestBody sink req
 ircIn :: MonadIO m => Request -> MVar Text -> m Response
 ircIn req mvar = do
     liftIO $ print $ queryString req
