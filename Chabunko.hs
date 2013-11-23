@@ -52,6 +52,9 @@ import           Network.Wai.Handler.Warp            hiding (Handle)
 
 import           System.IO
 
+
+-- {{{ Constants
+
 settings :: Settings
 settings = defaultSettings { settingsPort = 8088 }
 
@@ -66,6 +69,12 @@ nick = "Chabunko"
 
 channels :: [Text]
 channels = ["#bnetmlp"]
+
+messageamount :: Int
+messageamount = 200
+
+-- }}}
+
 
 atMay :: Int -> [a] -> Maybe a
 atMay _ [] = Nothing
@@ -116,9 +125,10 @@ ircOut req = do
     liftIO $ print $ queryString req
     base <- liftIO $ T.readFile "base.html"
     ls <- liftIO $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
-    let ps = T.unlines . reverse . map mkLine . appendTimes $ take 100 ls
+    let ps = T.unlines . reverse . map mkLine . appendTimes $ take messageamount ls
         query = map conv $ queryString req
-        def' = ("html", ps) : query <> def
+        -- def' = ("html", ps) : query <> def
+        def' = query <> def
         html = format base def'
     return . res $ if isJust $ lookup "nick" query
                    then T.encodeUtf8 html
@@ -150,7 +160,7 @@ ircNew req = do
     ls <- liftIO $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
     let mtime = join $ lookup "time" $ queryString req
         time = maybe "" T.decodeUtf8 mtime
-        ps = T.unlines . reverse . take 100 . map mkLine . dropOld time $ appendTimes ls
+        ps = T.unlines . reverse . take messageamount . dropOld time $ appendTimes ls
         query = map conv $ queryString req
     return . res $ if isJust $ lookup "nick" query
                    then T.encodeUtf8 ps
@@ -159,9 +169,6 @@ ircNew req = do
     appendTimes = fst . foldr appendTime (mempty, ("", 0))
     dropEmpty = dropWhile (== mempty)
     dropOld time = filter ((time <) . head . T.split (== '\t'))
-    mkLine x = "<span class=line>" <> mkCons x <> "</span>"
-    wrap = zipWith (\x y -> "<span class=" <> x <> ">" <> y <> "</span>")
-    mkCons x = T.unwords $ wrap ["timestamp", "nick", "message"] (T.split (== '\t') x)
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
 
 def :: [(Text, Text)]

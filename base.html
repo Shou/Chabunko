@@ -77,6 +77,9 @@ input
     ; overflow: hidden
     }
 
+.botnick:before
+    { content: "• " }
+
 .message
     { padding: 0pt 9pt
     ; width: 100%
@@ -116,10 +119,13 @@ span.line > .message
 
 <script type=text/javascript>
 
+// nick :: String
 var nick = "%nick"
 
+// time :: Number
 var time = 1000
 
+// colors :: Object String String
 var colors =
     { white: "%white", black: "%black", blue: "%blue", green: "%green"
     , red: "%red", darkred: "%darkred", darkmagenta: "%darkmagenta"
@@ -128,6 +134,7 @@ var colors =
     , magenta: "%magenta", gray: "%gray", lightgray: "%lightgray"
     }
 
+// colorints :: Object String String
 var colorints =
     { "00": "white", "01": "black", "02": "blue", "03": "green", "04": "red"
     , "05": "darkred", "06": "darkmagenta", "07": "orange", "08": "yellow"
@@ -151,8 +158,8 @@ function submit(s){
 
     var f = function(){
         if (xhr.readyState === 4) {
-            if (xhr.status === 200) flash("green")
-            else flash("red")
+            if (xhr.status === 200) flash(colors["green"])
+            else flash(colors["red"])
         }
     }
 
@@ -197,9 +204,7 @@ function nickColor(name){
                   ]
     var sum = 0
 
-    for(var i = 0; i < name.length; i++) {
-        sum += name.charCodeAt(i)
-    }
+    for(var i = 0; i < name.length; i++) sum += name.charCodeAt(i)
 
     sum = sum % rcolors.length
 
@@ -239,20 +244,45 @@ function pad(xs){
     return xs.length < 2 ? '0' + xs : xs
 }
 
+// Char by Char until regex matches then take until next \u0003
+// "\ETX00,00text text\ETX text"
 // colorize :: String -> String
 function colorize(co){
-    var fg = ""
-    var bg = ""
+    var coreg = /^\u0003(?:(1[0-5]|0?\d)(?:,(1[0-5]|0?\d))?)/
+    var nest = false
+    var acc = ""
 
-    co = co.replace(/\u0003/g, "")
+    for (var i = 0; i < co.length; i++) {
+        var ma = co.substr(i).match(coreg)
+        if (ma) {
+            if (nest) acc += "</span>"
+            var fg = "color:" + colors[colorints[pad(ma[1])]] + ';'
+            var bg = ""
+            if (ma[2] !== undefined)
+                bg = "background-color:" + colors[colorints[pad(ma[2])]] + ';'
 
-    if (co.match(",")) {
-        fg = colors[colorints[pad(co.split(',')[0])]]
-        bg = colors[colorints[pad(co.split(',')[1])]]
+            acc += "<span style='" + fg + bg + "'>"
 
-    } else fg = colors[colorints[pad(co)]]
+            i += ma[0].length - 1
+            nest = true
 
-    return "<span style=color:" + fg + ";background-color:" + bg + ">"
+        } else if (nest && co[i] === '\u0003') {
+            acc += "</span>"
+            nest = false
+
+        } else acc += co[i]
+    }
+
+    if (nest) acc += "</span>"
+
+    console.log("acc: " + acc)
+
+    return acc
+}
+
+// stripColor :: String -> String
+function stripColor(x){
+    return x.replace(/\u0003((1[0-5]|0?\d)(,(1[0-5]|0?\d))?)?/g, "")
 }
 
 function action(msg){
@@ -265,24 +295,47 @@ function action(msg){
 }
 
 // addNew :: String -> IO ()
-function addNew(html){
-    console.log(html)
-    if (html.length > 0) {
+function addNew(str){
+    var lines = str.split('\n').filter(function(x){ return x !== "" })
+
+    for (var i = 0; i < lines.length; i++) {
+        var line = document.createElement("span")
+        var ts = document.createElement("span")
+        var ni = document.createElement("span")
+        var ms = document.createElement("span")
+
+        var cells = lines[i].split('\t')
+        if (cells.length < 3) continue
+
+        line.className = "line"
+        ts.className = "timestamp"
+        ni.className = "nick"
+        ms.className = "message"
+
+        ts.textContent = cells[0].split('-')[2]
+        ts.name = cells[0]
+        ni.textContent = cells[1]
+        ms.textContent = cells.slice(2).join('\t')
+
+        line.appendChild(ts)
+        line.appendChild(ni)
+        line.appendChild(ms)
+
         var log = document.getElementById("log")
-        var ms = log.children
-        var olen = ms.length
-        log.innerHTML += html
-        var nlen = document.getElementById("log").children.length
+        log.appendChild(line)
 
-        console.log("Found " + (nlen - olen) + " new messages~")
+        prepareLine(line)
+    }
 
-        for (var i = olen - 1; i < nlen; i++) prepareLine(ms[i])
-
-        time = 1000
-
-    } else {
+    if (lines.length < 1) {
         console.log("Found no new messages!")
         time = Math.min(time * 2, 10800)
+
+    } else {
+        console.log("Found " + lines.length + " new messages~")
+        time = 1000
+
+        // autoscroll()
     }
 }
 
@@ -295,7 +348,8 @@ function prepareLine(line){
     if (ni.textContent === "Chabunko") {
         var msp = ms.innerHTML.split(": ")
         ms.innerHTML = msp.slice(1).join(": ")
-        ni.textContent = msp[0]
+        ni.textContent = stripColor(msp[0])
+        ni.className += " botnick"
     }
 
     // Nick coloring
@@ -311,15 +365,15 @@ function prepareLine(line){
     ms.innerHTML = ms.innerHTML.replace(/https?:\/\/\S+/ig, embed)
 
     // Coloring
-    ms.innerHTML = ms.innerHTML.replace(/\u0003(1[0-6]|0?\d)(,(1[0-6]|0?\d))?/g, colorize)
+    ms.innerHTML = colorize(ms.innerHTML)
 
-    // XXX only highlight nick?
     // Word highlighting
     if (ms.textContent.match(RegExp(nick, 'i'))) {
         console.log("Highlight: " + nick)
         ms.className += " highlight"
     }
 
+    // Actions
     if (ms.innerHTML.match(/^\u0001ACTION/)) {
         var nii = ni.cloneNode()
         nii.className = ""
@@ -355,23 +409,23 @@ function main(){
     var snick = document.getElementById("self")
     snick.style.color = nickColor(snick.value)
 
-    var lines = document.getElementsByClassName("line")
-
-    console.log(lines.length + " lines")
-    for (var i = 0; i < lines.length; i++) prepareLine(lines[i])
-
     document.getElementById("input").focus()
 
+    loadNew("")
     newLoop()
+}
+
+function stime(){
+    var ts = document.getElementsByClassName("timestamp")
+    return ts[ts.length - 1].name
 }
 
 // newLoop :: IO ()
 function newLoop(){
     setTimeout(function(){
-        var ts = document.getElementsByClassName("timestamp")
-        var stime = ts[ts.length - 1].textContent
-        console.log("Loading from timestamp " + stime)
-        loadNew(stime)
+        var t = stime()
+        console.log("Loading from timestamp " + t)
+        loadNew(t)
 
         newLoop()
     }, time)
@@ -385,16 +439,14 @@ function newLoop(){
 
 <div id=wrap>
 
-<div id=log>
-%html
-</div>
+<div id=log></div>
 
 <input>
 
 <form id=inputform method=POST>
     <div id=inputwrap>
         <input type=button class=nick id=self value=%nick>
-        <input type=text id=input name=msg>
+        <input type=text id=input autocomplete=off name=msg>
         <input type=hidden name=nick value=%nick>
     </div>
 </form>
