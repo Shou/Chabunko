@@ -13,7 +13,7 @@ html, body
     ; margin: 0
     ; font-family: %font
     ; font-size: %size
-    ; background-color: %bg
+    ; background: %bg
     ; color: %fg
     }
 
@@ -21,7 +21,7 @@ a { color: %link }
 
 input
     { color: %fg
-    ; background-color: %bg
+    ; background: %panelbg
     ; border: none
     ; font-family: %font
     ; font-size: %size
@@ -51,18 +51,18 @@ input
     }
 
 #input:hover
-    { background-color: %hoverbg }
+    { background: %hoverbg }
 
 #self
     { display: block
     ; float: left
-    ; background-color: %bg
+    ; background: %panelbg
     ; color: %fg
     ; border-top: 1px solid %fg
     }
 
 #self:hover
-    { background-color: %hoverbg }
+    { background: %hoverbg }
 
 .timestamp
     { color: %info }
@@ -89,13 +89,13 @@ span.line
     { display: table-row }
 
 span.line:nth-child(odd)
-    { background-color: %oddbg }
+    { background: %oddbg }
 
 span.line:nth-child(even)
-    { background-color: %evenbg }
+    { background: %evenbg }
 
 span.line:hover
-    { background-color: %hoverbg }
+    { background: %hoverbg }
 
 span.line > span
     { display: table-cell
@@ -113,6 +113,25 @@ span.line > .message
 
 .highlight
     { color: %highlight }
+
+#settings
+    { width: 100%
+    ; height: 100%
+    ; top: 0
+    ; left: 0
+    ; position: fixed
+    ; background-color: rgba(0, 0, 0, 0.5)
+    ; display: none
+    }
+
+#settingsform
+    { display: block
+    ; width: 80%
+    ; height: 80%
+    ; margin: 10% auto 0 auto
+    ; background: %panelbg
+    ; color: %fg
+    }
 
 %css
 </style>
@@ -298,6 +317,10 @@ function action(msg){
 function addNew(str){
     var lines = str.split('\n').filter(function(x){ return x !== "" })
 
+    // Scroll height before new messages
+    var wh = window.scrollY + window.innerHeight
+    var bh = document.body.scrollHeight
+
     for (var i = 0; i < lines.length; i++) {
         var line = document.createElement("span")
         var ts = document.createElement("span")
@@ -335,7 +358,11 @@ function addNew(str){
         console.log("Found " + lines.length + " new messages~")
         time = 1000
 
-        // autoscroll()
+        // Scroll
+        var log = document.getElementById("log")
+
+        console.log(wh + " >= " + (bh - 20))
+        if (wh >= bh - 20) window.scrollBy(0, log.scrollHeight)
     }
 }
 
@@ -368,7 +395,7 @@ function prepareLine(line){
     ms.innerHTML = colorize(ms.innerHTML)
 
     // Word highlighting
-    if (ms.textContent.match(RegExp(nick, 'i'))) {
+    if (ms.textContent.match(RegExp("(^|\s|[^a-zA-Z])" + nick + "(\s|$|[^a-zA-Z])", 'i'))) {
         console.log("Highlight: " + nick)
         ms.className += " highlight"
     }
@@ -385,6 +412,8 @@ function prepareLine(line){
 // main :: IO ()
 function main(){
     var iw = document.getElementById("inputform")
+
+    // Form submit hijack!
     iw.addEventListener("submit", function(e){
         e.preventDefault()
         submit(this.getElementsByName("msg")[0].value)
@@ -392,19 +421,38 @@ function main(){
 
     var inp = document.getElementById("input")
 
+    // Typing outside input will put the chars into the input.
     document.body.addEventListener("keyup", function(e){
         if (e.ctrlKey || e.altKey);
         else if (e.keyCode >= 32 || e.keyCode == 8) {
             e.stopPropagation()
-            inp.focus()
             inp.value += String.fromCharCode(e.keyCode)
+            inp.focus()
         }
     })
+
+    // Prevent Firefox from loading the search engine page
+    // i HATE you firefox
+    document.body.addEventListener("keydown", function(e){
+        if (e.ctrlKey && e.keyCode === 75) {
+            e.stopPropagation()
+            e.preventDefault()
+            return false
+        }
+    })
+
+    // Input keyboard shortcuts
     inp.addEventListener("keyup", function(e){
         e.stopPropagation()
         if (e.keyCode === 13)
             submit(this.value)
+
+        else if (e.ctrlKey && e.keyCode === 75)
+            inp.value += '\u0003'
     })
+
+    window.onscroll = function(e){
+    }
 
     var snick = document.getElementById("self")
     snick.style.color = nickColor(snick.value)
@@ -443,12 +491,24 @@ function newLoop(){
 
 <input>
 
-<form id=inputform method=POST>
+<form id=inputform method=GET>
     <div id=inputwrap>
         <input type=button class=nick id=self value=%nick>
         <input type=text id=input autocomplete=off name=msg>
         <input type=hidden name=nick value=%nick>
     </div>
+</form>
+
+</div>
+
+<div id=settings>
+
+<form id=settingsform method=GET>
+
+    <span class=line>
+        <span>Avatar: </span> <input type=text id=settings-avatar name=avatar>
+    </span>
+
 </form>
 
 </div>

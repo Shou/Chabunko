@@ -183,6 +183,7 @@ def = [ ("bg", "#fcfcfc")
       , ("self", "#888888")
       , ("info", "#888888")
       , ("highlight", "red")
+      , ("panelbg", "#fcfcfc")
 
       , ("white", "white")
       , ("black", "black")
