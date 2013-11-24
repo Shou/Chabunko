@@ -6,6 +6,8 @@
 
 <title>Chabunko</title>
 
+<!-- {{{ CSS -->
+
 <style type=text/css>
 
 html, body
@@ -108,11 +110,19 @@ span.line > .message
 .embed
     { max-height: 64px
     ; max-width: 100%
-    ; display: block
+    }
+
+.youtube
+    { background-size: 64px auto
+    ; background-position: center center
+    ; background-repeat: no-repeat
+    ; height: 20px
+    ; width: 28px
+    ; padding: 22px 18px
     }
 
 .highlight
-    { color: %highlight }
+    { text-shadow: 0 0 3px %highlight, 0 0 3px %highlight }
 
 #settings
     { width: 100%
@@ -128,13 +138,17 @@ span.line > .message
     { display: block
     ; width: 80%
     ; height: 80%
-    ; margin: 10% auto 0 auto
+    ; margin: 5% auto 0 auto
     ; background: %panelbg
     ; color: %fg
     }
 
 %css
 </style>
+
+<!-- }}} -->
+
+<!-- {{{ Javascript -->
 
 <script type=text/javascript>
 
@@ -191,7 +205,7 @@ function submit(s){
     xhr.send()
 }
 
-// | Load new messages. Takes time as a string as the only argument.
+// | Load new messages. Takes a timestamp as the only argument.
 // loadNew :: String -> IO ()
 function loadNew(time){
     var xhr = new XMLHttpRequest()
@@ -241,19 +255,24 @@ function embed(url){
     var mid = url
     var ra = "</a>"
 
-    if (url.match(/(jpe?g|a?png|gif|bmp)(\?\S+)?$/i))
-        mid = "<img class=embed src="
-            + url
-            + " alt="
-            + url
-            + ">"
+    if (settingGet("embed-toggle", true)) {
+        if (url.match(/(jpe?g|a?png|gif|bmp)(\?\S+)?$/i))
+            mid = "<img class=embed src="
+                + url
+                + " alt="
+                + url
+                + ">"
 
-    if (url.match(/youtu(\.be\/|be\.com\/watch\?v=\S+)/i))
-        mid = "<img class=embed src=http://img.youtube.com/vi/"
-            + url.match(/(youtu\.be\/|v=)(\S{11})/)[2]
-            + "/0.jpg alt="
-            + url
-            + ">"
+        if (url.match(/youtu(\.be\/|be\.com\/watch\?v=\S+)/i))
+            mid = "<img class='embed youtube'"
+                + " src=http://www.youtube.com/yt/brand/media/image/YouTube-icon-full_color.png"
+                + " style=background-image:url("
+                + "http://img.youtube.com/vi/"
+                + url.match(/(youtu\.be\/|v=)(\S{11})/)[2]
+                + "/0.jpg) alt="
+                + url
+                + ">"
+    }
 
     return la + mid + ra
 }
@@ -366,6 +385,7 @@ function addNew(str){
     }
 }
 
+// prepareLine :: String -> IO ()
 function prepareLine(line){
     var ts = line.children[0]
     var ni = line.children[1]
@@ -385,7 +405,7 @@ function prepareLine(line){
     else ni.style.color = "%self"
 
     // Nick max length
-    if (ni.textContent.length > 10)
+    if (ni.textContent.length > settingGet("nick-length", 10))
         ni.textContent = ni.textContent.substr(0, 10) + "…"
 
     // URLs and embedding
@@ -398,6 +418,10 @@ function prepareLine(line){
     if (ms.textContent.match(RegExp("(^|\s|[^a-zA-Z])" + nick + "(\s|$|[^a-zA-Z])", 'i'))) {
         console.log("Highlight: " + nick)
         ms.className += " highlight"
+        ni.className += " highlight"
+
+        if (settingGet("sound-toggle", true))
+            document.getElementById("audio").play()
     }
 
     // Actions
@@ -406,6 +430,16 @@ function prepareLine(line){
         nii.className = ""
         ms.innerHTML = ms.innerHTML.replace(/^\u0001ACTION/, nii.outerHTML)
         ni.innerHTML = "<span style=color:" + colors["red"] + ">♥</span>"
+    }
+}
+
+// settingGet :: String -> a -> IO a
+function settingGet(s, fallback){
+    try {
+        return JSON.parse(localStorage[s])
+
+    } catch(e) {
+        return fallback
     }
 }
 
@@ -451,7 +485,40 @@ function main(){
             inp.value += '\u0003'
     })
 
-    window.onscroll = function(e){
+    // Settings open/close events
+    var slf = document.getElementById("self")
+    var set = document.getElementById("settings")
+    var sef = document.getElementById("settingsform")
+
+    slf.addEventListener("click", function(e){
+        console.log("Open settings!")
+        set.style.display = "block"
+    })
+    set.addEventListener("click", function(e){
+        console.log("Close settings!")
+        set.style.display = ""
+    })
+    sef.addEventListener("click", function(e){
+        e.stopPropagation()
+    })
+
+    // TODO set values for inputs
+    // Setting input events and values
+    var sinps = sef.getElementsByTagName("input")
+    for (var i = 0; i < sinps.length; i++) {
+        var f = function(e){}
+
+        if (sinps[i].type === "checkbox")
+            f = function(e){
+                localStorage[this.name] = JSON.stringify(this.checked)
+            }
+
+        else if (sinps[i].type === "text")
+            f = function(e){
+                localStorage[this.name] = JSON.stringify(this.value)
+            }
+
+        sinps[i].addEventListener("blur", f)
     }
 
     var snick = document.getElementById("self")
@@ -463,6 +530,7 @@ function main(){
     newLoop()
 }
 
+// stime :: IO String
 function stime(){
     var ts = document.getElementsByClassName("timestamp")
     return ts[ts.length - 1].name
@@ -480,6 +548,8 @@ function newLoop(){
 }
 
 </script>
+
+<!-- }}} -->
 
 </head>
 
@@ -506,12 +576,22 @@ function newLoop(){
 <form id=settingsform method=GET>
 
     <span class=line>
-        <span>Avatar: </span> <input type=text id=settings-avatar name=avatar>
+        <span>Avatar: </span> <input type=text name=avatar>
+    </span><span class=line>
+        <span>Avatars? </span> <input type=checkbox name=avatars-toggle>
+    </span><span class=line>
+        <span>Sound: </span> <input type=text name=sound-url>
+    </span><span class=line>
+        <span>Sound? </span> <input type=checkbox name=sound-toggle>
+    </span><span class=line>
+        <span> Embedding? </span> <input type=checkbox name=embed-toggle>
     </span>
 
 </form>
 
 </div>
+
+<audio id=audio src=http://a.pomf.se/k70da.ogg>
 
 <script> main() </script>
 
