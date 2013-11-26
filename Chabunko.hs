@@ -63,7 +63,7 @@ import           System.IO
 -- {{{ Constants
 
 settings :: Settings
-settings = defaultSettings { settingsPort = 8088 }
+settings = defaultSettings { settingsPort = 8080 }
 
 server :: String
 server = "irc.rizon.net"
