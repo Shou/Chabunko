@@ -171,7 +171,7 @@ var colors =
     { white: "%white", black: "%black", blue: "%blue", green: "%green"
     , red: "%red", darkred: "%darkred", darkmagenta: "%darkmagenta"
     , orange: "%orange" , yellow: "%yellow", lightgreen: "%lightgreen"
-    , cyan: "%cyan", lightcyan: "%lightcyan", darkblue: "%darkblue"
+    , cyan: "%cyan", lightcyan: "%lightcyan", lightblue: "%lightblue"
     , magenta: "%magenta", gray: "%gray", lightgray: "%lightgray"
     }
 
@@ -179,13 +179,14 @@ var colors =
 var colorints =
     { "00": "white", "01": "black", "02": "blue", "03": "green", "04": "red"
     , "05": "darkred", "06": "darkmagenta", "07": "orange", "08": "yellow"
-    , "09": "lightgreen", "10": "cyan", "11": "lightcyan", "12": "darkblue"
+    , "09": "lightgreen", "10": "cyan", "11": "lightcyan", "12": "lightblue"
     , "13": "magenta", "14": "gray", "15": "lightgray"
     }
 
 var defaults =
     { "avatars-toggle": true
     , "sound-toggle": false
+    , "sound-volume": 50
     , "embed-toggle": true
     , "timestamp": 1
     , "colorize": true
@@ -225,10 +226,12 @@ function submit(s){
     xhr.onreadystatechange = f
 
     xhr.open("GET", "/irc-send?nick=" + encodeURIComponent(nick) + "&msg="
-            + encodeURIComponent(s)
+            + encodeURIComponent(s.substr(0, 420))
             )
 
     xhr.send()
+
+    loadNew(stime())
 }
 
 // | Load new messages. Takes a timestamp as the only argument.
@@ -256,10 +259,9 @@ function loadNew(time){
 
 // nickColor :: String -> String
 function nickColor(name){
-    var rcolors = [ colors["blue"], colors["green"], colors["red"]
-                  , colors["darkred"], colors["darkmagenta"], colors["orange"]
+    var rcolors = [ colors["green"], colors["red"], colors["darkmagenta"]
                   , colors["yellow"], colors["lightgreen"], colors["cyan"]
-                  , colors["lightcyan"], colors["darkblue"], colors["magenta"]
+                  , colors["lightcyan"], colors["lightblue"], colors["magenta"]
                   ]
     var sum = 0
 
@@ -459,8 +461,10 @@ function prepareLine(line){
     ms.innerHTML = colorize(ms.innerHTML)
 
     // Word highlighting
-    if (ms.textContent.match(RegExp("(^|\s|[^a-zA-Z])" + nick + "(\s|$|[^a-zA-Z])", 'i'))
-    && ni.textContent !== nick ) {
+    if (ms.textContent.match(RegExp( "(^|\s|[^a-zA-Z])"
+                                   + nick
+                                   + "(\s|$|[^a-zA-Z])", 'i'))
+    && ni.textContent !== nick) {
         console.log("Highlight: " + nick)
         ms.className += " highlight"
         ni.className += " highlight"
@@ -469,6 +473,8 @@ function prepareLine(line){
             var audio = document.getElementById("audio")
 
             audio.src = settingGet("sound-url", defaults["sound-url"])
+            audio.volume =
+                settingGet("sound-volume", defaults["sound-volume"]) / 100
             audio.play()
         }
     }
@@ -499,7 +505,9 @@ function main(){
     // Form submit hijack!
     iw.addEventListener("submit", function(e){
         e.preventDefault()
-        submit(this.getElementsByName("msg")[0].value)
+        var msg = this.getElementsByName("msg")[0]
+
+        if (msg.value.length > 0) submit(msg.value)
     })
 
     var inp = document.getElementById("input")
@@ -528,7 +536,7 @@ function main(){
     inp.addEventListener("keyup", function(e){
         e.stopPropagation()
         if (e.keyCode === 13)
-            submit(this.value)
+            if (this.value.length > 0) submit(this.value)
 
         else if (e.ctrlKey && e.keyCode === 75)
             inp.value += '\u0003'
@@ -658,7 +666,7 @@ function newLoop(){
     </span><span class=line>
         <span>Sound? </span> <input type=checkbox name=sound-toggle>
     </span><span class=line>
-        <span>Volume </span> <input type=range min=1 max=100 name=sound-volume>
+        <span>Volume </span> <input type=range min=0 max=100 name=sound-volume>
     </span><span class=line>
         <span>Embedding? </span> <input type=checkbox name=embed-toggle>
     </span><span class=line>

@@ -103,8 +103,7 @@ colorOf n = pack $ colors !! (sum (map ord snick) `mod` length colors)
     pack = T.encodeUtf8 . T.pack
     snick = T.unpack $ T.decodeUtf8 n
     colors =
-        [ "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13"
-        ]
+        [ "03", "04", "06", "08", "09", "10", "11", "12", "13" ]
 
 type MApplication = MVar Text -> MVar (Text, Int) -> Request -> ResourceT IO Response
 
@@ -224,7 +223,7 @@ def = [ ("bg", "#fcfcfc")
       , ("lightgreen", "lime")
       , ("cyan", "cyan")
       , ("lightcyan", "lightCyan")
-      , ("darkblue", "darkBlue")
+      , ("lightblue", "lightblue")
       , ("magenta", "magenta")
       , ("gray", "gray")
       , ("lightgray", "lightGray")
