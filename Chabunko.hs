@@ -20,12 +20,14 @@
 --      - Custom nick colors
 --      - We can do anything!
 --  - Flood control!!
---      - Send three messages per second only???
+--      - Send five messages per 10 seconds
 --  - Timestamp as name or value attribute or something!
 --  - Improved highlighting
 
 
 {-# LANGUAGE OverloadedStrings #-}
+
+-- {{{ Imports
 
 import           Blaze.ByteString.Builder.ByteString (fromByteString)
 
@@ -33,17 +35,21 @@ import           Control.Applicative
 import           Control.Concurrent                  (forkIO)
 import           Control.Concurrent.MVar
 import           Control.Monad
+import           Control.Monad.State
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Resource
 
 import           Data.ByteString                     (ByteString)
 import           Data.Char                           (ord)
+import           Data.Map                            (Map)
+import qualified Data.Map                            as M
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Text                           (Text)
 import qualified Data.Text                           as T
 import qualified Data.Text.Encoding                  as T
 import qualified Data.Text.IO                        as T
+import           Data.Time.Clock.POSIX
 
 import           Network
 import           Network.HTTP.Types
@@ -52,6 +58,7 @@ import           Network.Wai.Handler.Warp            hiding (Handle)
 
 import           System.IO
 
+-- }}}
 
 -- {{{ Constants
 
@@ -76,6 +83,12 @@ messageamount = 200
 -- }}}
 
 
+io :: MonadIO m => IO a -> m a
+io = liftIO
+
+debug :: (MonadIO m, Show a) => a -> m ()
+debug = io . print
+
 atMay :: Int -> [a] -> Maybe a
 atMay _ [] = Nothing
 atMay 0 (x:_) = Just x
@@ -93,7 +106,7 @@ colorOf n = pack $ colors !! (sum (map ord snick) `mod` length colors)
         [ "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13"
         ]
 
-type MApplication = Request -> MVar Text -> ResourceT IO Response
+type MApplication = MVar Text -> MVar (Text, Int) -> Request -> ResourceT IO Response
 
 appendTime :: Text -> ([Text], (Text, Integer))
            -> ([Text], (Text, Integer))
@@ -107,24 +120,18 @@ appendTime x (acc, (ot, n)) =
   in (x' : acc, (ct, n'))
 
 app :: MApplication
-app req mvar = case pathInfo req of
-    ("irc-send":_) -> ircIn req mvar
+app mvar0 mvar1 req = case pathInfo req of
+    ("irc-send":_) -> ircIn req mvar0 mvar1
     ("irc-new":_) -> ircNew req
+    ("irc-set":_) -> ircSet req
     ("irc":_) -> ircOut req
     _ -> return $ res "Who are you?!?!? are you food!!!"
 
--- UGUU!!!
-ircRes :: MonadIO m => Request -> MVar Text -> Maybe (m Response)
-ircRes req mvar = case requestMethod req of
-    "GET" -> Just $ ircOut req
-    "POST" -> Just $ ircIn req mvar
-    _ -> Nothing
-
 ircOut :: MonadIO m => Request -> m Response
 ircOut req = do
-    liftIO $ print $ queryString req
-    base <- liftIO $ T.readFile "base.html"
-    ls <- liftIO $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
+    debug $ queryString req
+    base <- io $ T.readFile "base.html"
+    ls <- io $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
     let ps = T.unlines . reverse . map mkLine . appendTimes $ take messageamount ls
         query = map conv $ queryString req
         -- def' = ("html", ps) : query <> def
@@ -142,22 +149,38 @@ ircOut req = do
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
     esc = T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "&" "&amp;"
 
-ircIn :: MonadIO m => Request -> MVar Text -> m Response
-ircIn req mvar = do
-    liftIO $ print $ queryString req
+ircIn :: MonadIO m => Request -> MVar Text -> MVar (Text, Int) -> m Response
+ircIn req mvar0 mvar1 = do
+    io $ print $ queryString req
     let mnick = join $ lookup "nick" $ queryString req
         mmsg = join $ lookup "msg" $ queryString req
         mfull = (\x y -> colorize x <> ": " <> y) <$> mnick <*> mmsg
-    if isJust $ lookup "nick" $ queryString req
-      then do
-        liftIO $ maybe (return ()) (putMVar mvar . T.decodeUtf8) mfull
-        return $ res "You posted!"
-      else return $ res "Error - no nickname provided!"
+    bs <- io $ M.fromList . map (T.break (== '\t')) . T.lines <$> readBanned
+    let mts = join $ flip M.lookup bs . T.decodeUtf8 <$> mnick
+        -- i dont believe in side effects
+        t = maybe 0 (read . drop 1 . T.unpack) mts
+    ct <- io $ floor <$> getPOSIXTime
+    case () of
+      _ | isNothing mnick -> return $ res "Error - no nickname provided!"
+        | t > ct + 1000 -> return $ res $ "Error - you are permanently banned!"
+        | t > ct -> return $ res $ "Error - you are temporarily banned!"
+        | t <= ct -> do
+            let nick = T.decodeUtf8 $ fromJust mnick
+            io $ putMVar mvar1 (nick, t)
+            io $ maybe (return ()) (putMVar mvar0 . T.decodeUtf8) mfull
+            io $ T.writeFile "banned" ""
+            -- Surely nothing else will write to the file! (╹◡╹✿)
+            io $ forM_ (M.toList bs) $ \(ni, ts) -> unless (ni == nick) $ do
+                T.appendFile "banned" $ ni <> ts
+            return $ res ""
+        | otherwise -> return $ res "Error - I am a cat!"
+  where
+    readBanned = T.readFile "banned"
 
 ircNew :: MonadIO m => Request -> m Response
 ircNew req = do
-    liftIO $ print $ queryString req
-    ls <- liftIO $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
+    io $ print $ queryString req
+    ls <- io $ reverse . dropEmpty . T.lines <$> T.readFile "irc.txt"
     let mtime = join $ lookup "time" $ queryString req
         time = maybe "" T.decodeUtf8 mtime
         ps = T.unlines . reverse . take messageamount . dropOld time $ appendTimes ls
@@ -170,6 +193,10 @@ ircNew req = do
     dropEmpty = dropWhile (== mempty)
     dropOld time = filter ((time <) . head . T.split (== '\t'))
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
+
+ircSet :: MonadIO m => Request -> m Response
+ircSet req = do
+    return $ res ""
 
 def :: [(Text, Text)]
 def = [ ("bg", "#fcfcfc")
@@ -249,8 +276,8 @@ runIRC mvar = do
     hSetEncoding h utf8
     hSetBuffering h LineBuffering
     hSetNewlineMode h (NewlineMode CRLF CRLF)
-    write h $ "NICK " `T.append` nick
-    write h $ "USER " `T.append` nick `T.append` " 0 * :" `T.append` nick
+    write h $ "NICK " <> nick
+    write h $ "USER " <> nick <> " 0 * :" <> nick
     forM_ channels $ write h . ("JOIN " <>)
     _ <- forkIO . forever $ userInput h
     _ <- forkIO . forever $ takeMVar mvar >>= write h . ("PRIVMSG #bnetmlp :" <>)
@@ -261,7 +288,35 @@ runIRC mvar = do
         hPutStrLn h line
 
 
+type Memory = StateT (Map Text [Int]) IO
+
+runAntiFlooder :: MVar (Text, Int) -> IO ()
+runAntiFlooder = void . forkIO . void . flip runStateT mempty . antiFlooder
+
+antiFlooder :: MVar (Text, Int) -> Memory ()
+antiFlooder m = forever $ do
+    (nick, ts) <- io $ takeMVar m
+    debug $ "antiFlooder found message by " <> T.unpack nick
+    mts <- get
+    let mts' = M.alter (Just . maybe [ts] (ts :)) nick mts
+        tss = fromJust $ M.lookup nick mts'
+    when (length tss >= 5 && offSum (take 5 tss) < 10) $ do
+        debug $ "Banning " <> T.unpack nick
+        -- IO Exceptions are for losers!
+        bt <- textPOSIXTime (+ 30)
+        io $ T.appendFile "banned" $ nick <> "\t" <> bt
+    put mts'
+  where
+    -- (゜△゜;)
+    offSum (x:y:[]) = x - y
+    offSum (x:y:xs) = x - y + offSum (y:xs)
+    textPOSIXTime f = io $ T.pack . show . floor . f <$> getPOSIXTime
+
+
 main :: IO ()
 main = do
-  m <- newEmptyMVar
-  runIRC m >> runSettings settings (`app` m)
+    debug "Starting server..."
+    m0 <- newEmptyMVar
+    m1 <- newEmptyMVar
+    runAntiFlooder m1 >> runIRC m0 >> runSettings settings (app m0 m1)
+
