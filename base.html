@@ -66,6 +66,33 @@ input
 #self:hover
     { background: %hoverbg }
 
+#settings
+    { width: 100%
+    ; height: 100%
+    ; top: 0
+    ; left: 0
+    ; position: fixed
+    ; background-color: rgba(0, 0, 0, 0.5)
+    ; display: none
+    }
+
+#settingsform
+    { display: block
+    ; width: 80%
+    ; height: 80%
+    ; margin: 5% auto 0 auto
+    ; padding: 16px
+    ; border: 1px solid %fg
+    ; background: %panelbg
+    ; color: %fg
+    }
+
+#settings input[type="text"]
+    { background-color: %bg
+    ; border: 1px solid %fg
+    ; color: %fg
+    }
+
 .timestamp
     { color: %info }
 
@@ -124,25 +151,6 @@ span.line > .message
 .highlight
     { text-shadow: 0 0 3px %highlight, 0 0 3px %highlight }
 
-#settings
-    { width: 100%
-    ; height: 100%
-    ; top: 0
-    ; left: 0
-    ; position: fixed
-    ; background-color: rgba(0, 0, 0, 0.5)
-    ; display: none
-    }
-
-#settingsform
-    { display: block
-    ; width: 80%
-    ; height: 80%
-    ; margin: 5% auto 0 auto
-    ; background: %panelbg
-    ; color: %fg
-    }
-
 %css
 </style>
 
@@ -175,6 +183,18 @@ var colorints =
     , "13": "magenta", "14": "gray", "15": "lightgray"
     }
 
+var defaults =
+    { "avatars-toggle": true
+    , "sound-toggle": false
+    , "embed-toggle": true
+    , "timestamp": 1
+    , "colorize": true
+    , "sound-url": "http://a.pomf.se/k70da.ogg"
+    , "avatar-url": ""
+    , "nick-length": 10
+    }
+
+
 // flash :: String -> IO ()
 function flash(c){
     var inp = document.getElementById("input")
@@ -191,8 +211,14 @@ function submit(s){
 
     var f = function(){
         if (xhr.readyState === 4) {
-            if (xhr.status === 200) flash(colors["green"])
-            else flash(colors["red"])
+            if (xhr.status === 200 && xhr.responseText.length === 0)
+                flash(colors["green"])
+
+            else if (xhr.responseText.length > 0) {
+                flash(colors["red"])
+                alert(xhr.responseText)
+
+            } else flash(colors["red"])
         }
     }
 
@@ -255,7 +281,7 @@ function embed(url){
     var mid = url
     var ra = "</a>"
 
-    if (settingGet("embed-toggle", true)) {
+    if (settingGet("embed-toggle", defaults["embed-toggle"])) {
         if (url.match(/(jpe?g|a?png|gif|bmp)(\?\S+)?$/i))
             mid = "<img class=embed src="
                 + url
@@ -282,8 +308,6 @@ function pad(xs){
     return xs.length < 2 ? '0' + xs : xs
 }
 
-// Char by Char until regex matches then take until next \u0003
-// "\ETX00,00text text\ETX text"
 // colorize :: String -> String
 function colorize(co){
     var coreg = /^\u0003(?:(1[0-5]|0?\d)(?:,(1[0-5]|0?\d))?)/
@@ -332,6 +356,24 @@ function action(msg){
     return msg
 }
 
+// formatTime :: String -> IO String
+function formatTime(x){
+    var t = settingGet("timestamp", defaults["timestamp"])
+
+    if  (t === 0) x = x.split('-').slice(0, 3).join('-')
+
+    else if (t === 1)
+        x = x.split('-')[2]
+
+    else if (t === 2)
+        x = x.split('-')[2].split(' ')[1]
+
+    else if (t === 3)
+        x = x.split('-')[2].split(' ')[1].split(':').slice(0, 2).join(':')
+
+    return x
+}
+
 // addNew :: String -> IO ()
 function addNew(str){
     var lines = str.split('\n').filter(function(x){ return x !== "" })
@@ -354,7 +396,7 @@ function addNew(str){
         ni.className = "nick"
         ms.className = "message"
 
-        ts.textContent = cells[0].split('-')[2]
+        ts.textContent = formatTime(cells[0])
         ts.name = cells[0]
         ni.textContent = cells[1]
         ms.textContent = cells.slice(2).join('\t')
@@ -400,13 +442,15 @@ function prepareLine(line){
     }
 
     // Nick coloring
-    if ("%nick" !== nickOnly(ni.textContent))
+    if (nick === nickOnly(ni.textContent)) ni.style.color = "%self"
+    else if (settingGet("colorize-toggle", defaults["colorize-toggle"]))
         ni.style.color = nickColor(nickOnly(ni.textContent))
-    else ni.style.color = "%self"
+
 
     // Nick max length
-    if (ni.textContent.length > settingGet("nick-length", 10))
-        ni.textContent = ni.textContent.substr(0, 10) + "…"
+    var nl = settingGet("nick-length", defaults["nick-length"])
+    if (ni.textContent.length > nl)
+        ni.textContent = ni.textContent.substr(0, nl) + "…"
 
     // URLs and embedding
     ms.innerHTML = ms.innerHTML.replace(/https?:\/\/\S+/ig, embed)
@@ -415,13 +459,18 @@ function prepareLine(line){
     ms.innerHTML = colorize(ms.innerHTML)
 
     // Word highlighting
-    if (ms.textContent.match(RegExp("(^|\s|[^a-zA-Z])" + nick + "(\s|$|[^a-zA-Z])", 'i'))) {
+    if (ms.textContent.match(RegExp("(^|\s|[^a-zA-Z])" + nick + "(\s|$|[^a-zA-Z])", 'i'))
+    && ni.textContent !== nick ) {
         console.log("Highlight: " + nick)
         ms.className += " highlight"
         ni.className += " highlight"
 
-        if (settingGet("sound-toggle", true))
-            document.getElementById("audio").play()
+        if (settingGet("sound-toggle", defaults["sound-toggle"])) {
+            var audio = document.getElementById("audio")
+
+            audio.src = settingGet("sound-url", defaults["sound-url"])
+            audio.play()
+        }
     }
 
     // Actions
@@ -502,27 +551,52 @@ function main(){
         e.stopPropagation()
     })
 
-    // TODO set values for inputs
     // Setting input events and values
     var sinps = sef.getElementsByTagName("input")
     for (var i = 0; i < sinps.length; i++) {
         var f = function(e){}
 
-        if (sinps[i].type === "checkbox")
+        if (sinps[i].type === "checkbox") {
             f = function(e){
                 localStorage[this.name] = JSON.stringify(this.checked)
             }
 
-        else if (sinps[i].type === "text")
+            sinps[i].checked = settingGet(sinps[i].name, defaults[sinps[i].name])
+
+        } else if (sinps[i].type === "text") {
             f = function(e){
                 localStorage[this.name] = JSON.stringify(this.value)
             }
 
+            sinps[i].value = settingGet(sinps[i].name, defaults[sinps[i].name])
+
+        } else if (sinps[i].type === "range") {
+            f = function(e){
+                this.title = this.value
+                localStorage[this.name] = JSON.stringify(parseInt(this.value))
+            }
+
+            sinps[i].value = settingGet(sinps[i].name, defaults[sinps[i].name])
+            sinps[i].title = sinps[i].value
+        }
+
         sinps[i].addEventListener("blur", f)
     }
 
-    var snick = document.getElementById("self")
-    snick.style.color = nickColor(snick.value)
+    var ssels = sef.getElementsByTagName("select")
+    for (var i = 0; i < ssels.length; i++) {
+        ssels[i].addEventListener("change", function(e){
+            console.log(this.name + ": " + this.selectedIndex)
+            localStorage[this.name] = JSON.stringify(this.selectedIndex)
+        })
+
+        ssels[i].selectedIndex = settingGet(ssels[i].name, defaults[ssels[i].name])
+    }
+
+    if (settingGet("colorize-toggle", defaults["colorize-toggle"])) {
+        var snick = document.getElementById("self")
+        snick.style.color = nickColor(snick.value)
+    }
 
     document.getElementById("input").focus()
 
@@ -576,7 +650,7 @@ function newLoop(){
 <form id=settingsform method=GET>
 
     <span class=line>
-        <span>Avatar: </span> <input type=text name=avatar>
+        <span>Avatar: </span> <input class=external type=text name=avatar-url>
     </span><span class=line>
         <span>Avatars? </span> <input type=checkbox name=avatars-toggle>
     </span><span class=line>
@@ -584,14 +658,26 @@ function newLoop(){
     </span><span class=line>
         <span>Sound? </span> <input type=checkbox name=sound-toggle>
     </span><span class=line>
-        <span> Embedding? </span> <input type=checkbox name=embed-toggle>
+        <span>Embedding? </span> <input type=checkbox name=embed-toggle>
+    </span><span class=line>
+        <span>Timestamp: </span>
+            <select name=timestamp>
+                <option>Full date and time</option>
+                <option>Day and time</option>
+                <option>Time</option>
+                <option>Time (without seconds)</option>
+            </select>
+    </span><span class=line>
+        <span>Colorize nicks? </span> <input type=checkbox name=colorize-toggle>
+    </span><span class=line>
+        <span>Nick length: </span> <input type=range min=1 max=32 name=nick-length>
     </span>
 
 </form>
 
 </div>
 
-<audio id=audio src=http://a.pomf.se/k70da.ogg>
+<audio id=audio>
 
 <script> main() </script>
 
