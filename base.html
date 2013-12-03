@@ -120,7 +120,14 @@ table td
     }
 
 .timestamp
-    { color: %info }
+    { color: %info
+    ; padding: 0pt 8pt
+    }
+
+.avatar
+    { max-width: 24px
+    ; max-height: 24px
+    }
 
 .nick
     { color: #bb88dd
@@ -186,17 +193,20 @@ span.line > .message
 
 <script type=text/javascript>
 
-// nick :: String
+// nick :: Nick
 var nick = "%nick"
 
 // selfc :: String
 var selfc = "%self"
 
-// userlist :: [String]
+// userlist :: [Nick]
 var userlist = []
 
 // history :: [String]
 var history = []
+
+// avatars :: Object Nick String
+var avatars = {}
 
 // colors :: Object String String
 var colors =
@@ -223,7 +233,6 @@ var defaults =
     , "timestamp": 1
     , "colorize-toggle": true
     , "sound-url": "http://a.pomf.se/k70da.ogg"
-    , "avatar-url": ""
     , "nick-length": 10
     , "font-size": 9
     }
@@ -281,9 +290,9 @@ function connect(){
                 return us.filter(function(u) { return u !== nick }).concat(nick)
             })
 
-        else if (cmds[0] === "set") null
+        else if (cmds[0] === "set") options(JSON.parse(dat))
 
-        else if (cmds[0] === "opt") null
+        else if (cmds[0] === "opt") options(JSON.parse(dat))
 
         else if (cmds[0] === "opts") null
 
@@ -454,21 +463,25 @@ function addMessage(msgs){
     for (var i = 0; i < msgs.length; i++) {
         var line = document.createElement("span")
         var ts = document.createElement("span")
+        var av = document.createElement("img")
         var ni = document.createElement("span")
         var ms = document.createElement("span")
 
         line.className = "line"
         ts.className = "timestamp"
+        av.className = "avatar"
         ni.className = "nick"
         ms.className = "message"
 
         ts.textContent = formatTime(msgs[i].time)
         ts.name = msgs[i].time
         ts.title = (new Date(msgs[i].time * 1000)).toUTCString()
+        av.src = avatars[msgs[i].nick] ? avatars[msgs[i].nick] : ""
         ni.textContent = msgs[i].nick
         ms.textContent = msgs[i].msg
 
         line.appendChild(ts)
+        line.appendChild(av)
         line.appendChild(ni)
         line.appendChild(ms)
 
@@ -514,6 +527,15 @@ function addUserlist(f){
     flash("color", colors["cyan"], usercount)
 }
 
+// options :: Object Key (Object Nick String) -> IO ()
+function options(o) {
+    for (var k in o) if (k === "avatar-url") for (var j in o[k]) {
+        avatars[j] = o[k][j]
+    }
+
+    setAvatars()
+}
+
 // banned :: POSIXTime -> IO ()
 function banned(ts) {
     flash("backgroundColor", colors["red"], document.getElementById("input"))
@@ -545,11 +567,27 @@ function warning(n){
     }
 }
 
+// setAvatars :: IO ()
+function setAvatars() {
+    var lg = document.getElementById("log")
+    var nks = lg.getElementsByClassName("nick")
+
+    for (var i = 0; i < nks.length; i++) {
+        var url = avatars[nks[i].textContent]
+
+        if (url !== undefined) nks[i].previousSibling.src = url
+    }
+
+    document.getElementsByClassName("external")[0].value =
+        avatars[nick] ? avatars[nick] : ""
+}
+
 // prepareLine :: String -> IO ()
 function prepareLine(line){
     var ts = line.children[0]
-    var ni = line.children[1]
-    var ms = line.children[2]
+    var av = line.children[1]
+    var ni = line.children[2]
+    var ms = line.children[3]
 
     // Display user nick
     if (ni.textContent === "Chabunko") {
@@ -647,9 +685,9 @@ function main(){
 
     // Typing outside input will put the chars into the input.
     document.body.addEventListener("keyup", function(e){
+        e.stopPropagation()
         if (e.ctrlKey || e.altKey);
         else if (e.keyCode >= 32 || e.keyCode == 8) {
-            e.stopPropagation()
             inp.value += String.fromCharCode(e.keyCode)
             inp.focus()
         }
@@ -718,6 +756,17 @@ function main(){
 
             sinps[i].checked = settingGet(sinps[i].name, defaults[sinps[i].name])
 
+        } else if (sinps[i].className === "external") {
+            console.log("external event")
+            f = function(e){
+                ws.send("set " + this.name + ' ' + this.value)
+
+                flash("backgroundColor", colors["cyan"], this)
+
+                avatars[nick] = this.value
+                setAvatars()
+            }
+
         } else if (sinps[i].type === "text") {
             f = function(e){
                 localStorage[this.name] = JSON.stringify(this.value)
@@ -736,14 +785,6 @@ function main(){
 
             sinps[i].value = settingGet(sinps[i].name, defaults[sinps[i].name])
             sinps[i].title = sinps[i].value
-
-        } else if (sinps[i].type === "external") {
-            f = function(e){
-                ws.send("set " + this.name + ' ' + this.value)
-
-                flash("backgroundColor", colors["cyan"], this)
-            }
-
         }
 
         sinps[i].addEventListener("blur", f)
@@ -778,8 +819,14 @@ function main(){
     var us = document.getElementById("usercount")
     us.addEventListener("click", function(e){
         var e = document.getElementById("userlist")
-        if (e.style.display === "none") e.style.display = ""
-        else e.style.display = "none"
+        var p = document.getElementById("userlist-pad")
+
+        if (localStorage["userlist-toggle"] === "none")
+            localStorage["userlist-toggle"] = ""
+        else localStorage["userlist-toggle"] = "none"
+
+        e.style.display = localStorage["userlist-toggle"]
+        p.style.display = localStorage["userlist-toggle"]
     })
 
     // J-JAM IT IN
@@ -803,8 +850,13 @@ function stime(){
 <div id=wrap>
 
 <div id=userlist></div>
+
+<!-- >not being a lazy programmer; >2013 -->
+<input id=userlist-pad style=opacity:0>
+
 <div id=log></div>
 
+<!-- >not being a lazy programmer; >2013 -->
 <input style=opacity:0>
 
 </div>
@@ -824,7 +876,7 @@ function stime(){
 <form id=settingsform method=GET>
 
     <span class=line>
-        <span>Avatar: </span> <input type=external name=avatar-url>
+        <span>Avatar: </span> <input class=external name=avatar-url>
     </span><span class=line>
         <span>Avatars? </span> <input type=checkbox name=avatars-toggle>
     </span><span class=line>

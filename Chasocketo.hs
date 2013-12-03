@@ -9,6 +9,9 @@
 -- FIXME
 --  - Warning send: invalid argument (Bad file descriptor)
 
+-- TODO
+--  - Banning
+
 
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -241,11 +244,9 @@ safeSt st = do
         Left (er :: SomeException) -> warn er >> return (Left ())
         Right a -> return $ Right a
 
--- TODO remove
 escape :: Text -> Text
 escape = T.replace "\"" "\\\"" . T.replace "\\" "\\\\"
 
--- TODO remove
 quote :: (Monoid a, IsString a) => a -> a
 quote x = "\"" <> x <> "\""
 
@@ -275,7 +276,9 @@ app t pc = do
         em <- safe (receiveData c)
         let emnick = flip parseMay name <$> em
         case emnick of
-            Right (Just n) -> verb ("Name: " <> CI.original n) >> return (Right n)
+            Right (Just n) -> do
+                verb ("Name: " <> CI.original n)
+                if n == "" then return $ Left () else return $ Right n
             Right Nothing -> do
                 forM_ [erro, void . safe . sendTextData c] ($ ("name <nickname>" :: Text))
                 nickInit c
@@ -344,9 +347,13 @@ consumer t = void . flip runStateT (mempty :: Memory) $ forever $ do
             Set nk ke va -> do
                 let f = Just . M.insert nk va . maybe mempty id
                 put $ m { users = M.alter f ke ks }
-                let tu = [ ( T.unpack $ CI.original ke
-                           , showJSON va
-                           ) ]
+                let tu = makeObj
+                            [ ( T.unpack $ CI.original ke
+                              , makeObj
+                                    [ ( T.unpack $ CI.original nk
+                                      , showJSON va
+                                      ) ]
+                              ) ]
                 relay time $ "set " <> T.pack (encodeStrict tu)
 
             Opt ke -> liftIO $ do
@@ -366,8 +373,8 @@ consumer t = void . flip runStateT (mempty :: Memory) $ forever $ do
             Req nk ts -> do
                 liftIO $ print ms
                 let ums = map (T.pack . show) $ filter ((> ts) . msgTime) ms
-                    ls = encode . showJSON $ reverse ums
-                liftIO . void . safe $ sendTextData cn $ "msgs " <> T.pack ls
+                    ls = "[" <> T.intercalate "," (reverse ums) <> "]"
+                liftIO . void . safe $ sendTextData cn $ "msgs " <> ls
 
             List -> do
                 let usl = encodeStrict . showJSON . map CI.original $ M.keys cs
