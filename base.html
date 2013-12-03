@@ -29,11 +29,17 @@ input
     ; font-size: %size
     }
 
+table
+    { border-spacing: 0
+    ; border-collapse: collapse
+    }
+
+table td
+    { padding: 0 }
+
 #log
     { padding: 2px
     ; display: table
-    ; width: 100%
-    ; max-width: 100%
     ; overflow: hidden
     }
 
@@ -45,26 +51,45 @@ input
     ; width: 100%
     }
 
+#inputwrap
+    { box-shadow: 0 0 5px %fg }
+
 #input
     { overflow: hidden
     ; display: block
     ; width: 100%
-    ; border-top: 1px solid %fg
     }
 
 #input:hover
     { background: %hoverbg }
 
 #self
-    { display: block
-    ; float: left
+    { color: %fg
     ; background: %panelbg
-    ; color: %fg
-    ; border-top: 1px solid %fg
+    ; margin: 0
     }
 
 #self:hover
     { background: %hoverbg }
+
+#usercount
+    { color: %fg
+    ; background: %panelbg
+    ; margin: 0
+    ; border-left: 1px solid %fg
+    }
+
+#userlist
+    { position: fixed
+    ; top: 0
+    ; left: 0
+    ; width: 100%
+    ; background: %panelbg
+    ; box-shadow: 0 0 5px %fg
+    }
+
+#userlist > *
+    { margin-left: %size }
 
 #settings
     { width: 100%
@@ -85,6 +110,7 @@ input
     ; border: 1px solid %fg
     ; background: %panelbg
     ; color: %fg
+    ; overflow: auto
     }
 
 #settings input[type="text"]
@@ -163,8 +189,14 @@ span.line > .message
 // nick :: String
 var nick = "%nick"
 
-// time :: Number
-var time = 1000
+// selfc :: String
+var selfc = "%self"
+
+// userlist :: [String]
+var userlist = []
+
+// history :: [String]
+var history = []
 
 // colors :: Object String String
 var colors =
@@ -185,76 +217,100 @@ var colorints =
 
 var defaults =
     { "avatars-toggle": true
-    , "sound-toggle": false
+    , "sound": 1
     , "sound-volume": 50
     , "embed-toggle": true
     , "timestamp": 1
-    , "colorize": true
+    , "colorize-toggle": true
     , "sound-url": "http://a.pomf.se/k70da.ogg"
     , "avatar-url": ""
     , "nick-length": 10
+    , "font-size": 9
     }
 
+var ws = null
 
-// flash :: String -> IO ()
-function flash(c){
-    var inp = document.getElementById("input")
 
-    inp.style.backgroundColor = c
-    setTimeout(function(){ inp.style.backgroundColor = "" }, 1000)
-    inp.value = ""
+// connect :: IO ()
+function connect(){
+    ws = new WebSocket("ws://nitori.shou.io:8088/")
+
+    ws.onopen = function(){
+        console.log("Connected!")
+
+        ws.send("name " + nick)
+        ws.send("req 0")
+        ws.send("list")
+        ws.send("opt avatar-url")
+    }
+
+    ws.onerror = function(e){ console.log(e) }
+
+    ws.onclose = function(e){
+        ws = null
+    }
+
+    ws.onmessage = function(e){
+        console.log(e.data)
+
+        var cmds = e.data.split(' ')
+        var dat = cmds.slice(1).join(' ')
+
+        if (cmds.length < 1) console.log("Incorrect WebSocket data")
+
+        else if (cmds[0] === "ping") ws.send("pong")
+
+        else if (cmds.length < 2) console.log("Incorrect WebSocket data")
+
+        else if (cmds[0] === "msgs") addMessage(JSON.parse(dat))
+
+        else if (cmds[0] === "list")
+            addUserlist(function(us) {
+                return JSON.parse(dat)
+            })
+
+        else if (cmds[0] === "quit")
+            addUserlist(function(us) {
+                var nick = JSON.parse(dat)
+                return us.filter(function(u) { return u !== nick })
+            })
+
+        else if (cmds[0] === "join")
+            addUserlist(function(us) {
+                var nick = JSON.parse(dat)
+                return us.filter(function(u) { return u !== nick }).concat(nick)
+            })
+
+        else if (cmds[0] === "set") null
+
+        else if (cmds[0] === "opt") null
+
+        else if (cmds[0] === "opts") null
+
+        else if (cmds[0] === "ban") banned(JSON.parse(dat))
+
+        else if (cmds[0] === "warn") warning(JSON.parse(dat))
+
+        else console.log("Unsupported command.")
+
+    }
+}
+
+// flash :: String -> String -> Elem -> IO ()
+function flash(s, c, e){
+    e.style[s] = c
+    setTimeout(function(){ e.style[s] = "" }, 1000)
 }
 
 // submit :: String -> IO ()
 function submit(s){
-    var xhr = new XMLHttpRequest()
-    xhr.timeout = 10800
+    ws.send("msg " + s)
 
-    var f = function(){
-        if (xhr.readyState === 4) {
-            if (xhr.status === 200 && xhr.responseText.length === 0)
-                flash(colors["green"])
+    var time = (new Date()).getTime() / 1000
 
-            else if (xhr.responseText.length > 0) {
-                flash(colors["red"])
-                alert(xhr.responseText)
+    addMessage([{ nick: nick, time: time, msg: s }])
 
-            } else flash(colors["red"])
-        }
-    }
-
-    xhr.onreadystatechange = f
-
-    xhr.open("GET", "/irc-send?nick=" + encodeURIComponent(nick) + "&msg="
-            + encodeURIComponent(s.substr(0, 420))
-            )
-
-    xhr.send()
-
-    loadNew(stime())
-}
-
-// | Load new messages. Takes a timestamp as the only argument.
-// loadNew :: String -> IO ()
-function loadNew(time){
-    var xhr = new XMLHttpRequest()
-    xhr.timeout = 10800
-
-    var f = function(){
-        if (xhr.readyState === 4) {
-            if (xhr.status === 200) addNew(xhr.responseText)
-            else console.warn("Unable to load new messages.")
-        }
-    }
-
-    xhr.onreadystatechange = f
-
-    xhr.open("GET", "/irc-new?nick=" + encodeURIComponent(nick) + "&time="
-            + encodeURIComponent(time) + "&rand="
-            + encodeURIComponent((new Date()).getTime())
-            )
-
-    xhr.send()
+    history.push(s)
 }
 
 // nickColor :: String -> String
@@ -358,50 +414,59 @@ function action(msg){
     return msg
 }
 
-// formatTime :: String -> IO String
+// formatTime :: POSIXTime -> IO String
 function formatTime(x){
     var t = settingGet("timestamp", defaults["timestamp"])
+    var time = ""
 
-    if  (t === 0) x = x.split('-').slice(0, 3).join('-')
+    var D = new Date(x * 1000)
+    var ho = pad(D.getHours() + "")
+    var mi = pad(D.getMinutes() + "")
+    var se = pad(D.getSeconds() + "")
+    var wd = D.getDay()
+    var da = D.getDate()
+    var mo = D.getMonth()
+    var ye = D.getFullYear()
 
-    else if (t === 1)
-        x = x.split('-')[2]
+    var days = [ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" ]
 
-    else if (t === 2)
-        x = x.split('-')[2].split(' ')[1]
+    if  (t < 4)
+        time = ho + ':' + mi
 
-    else if (t === 3)
-        x = x.split('-')[2].split(' ')[1].split(':').slice(0, 2).join(':')
+    if (t < 3)
+        time += ':' + se
 
-    return x
+    if (t === 1)
+        time = days[wd] + ' ' + time
+
+    else if (t === 0)
+        time = ye + '-' + mo + '-' + da + ' ' + time
+
+    return time
 }
 
-// addNew :: String -> IO ()
-function addNew(str){
-    var lines = str.split('\n').filter(function(x){ return x !== "" })
-
+// addMessage :: [Msg] -> IO ()
+function addMessage(msgs){
     // Scroll height before new messages
     var wh = window.scrollY + window.innerHeight
     var bh = document.body.scrollHeight
 
-    for (var i = 0; i < lines.length; i++) {
+    for (var i = 0; i < msgs.length; i++) {
         var line = document.createElement("span")
         var ts = document.createElement("span")
         var ni = document.createElement("span")
         var ms = document.createElement("span")
-
-        var cells = lines[i].split('\t')
-        if (cells.length < 3) continue
 
         line.className = "line"
         ts.className = "timestamp"
         ni.className = "nick"
         ms.className = "message"
 
-        ts.textContent = formatTime(cells[0])
-        ts.name = cells[0]
-        ni.textContent = cells[1]
-        ms.textContent = cells.slice(2).join('\t')
+        ts.textContent = formatTime(msgs[i].time)
+        ts.name = msgs[i].time
+        ts.title = (new Date(msgs[i].time * 1000)).toUTCString()
+        ni.textContent = msgs[i].nick
+        ms.textContent = msgs[i].msg
 
         line.appendChild(ts)
         line.appendChild(ni)
@@ -413,19 +478,70 @@ function addNew(str){
         prepareLine(line)
     }
 
-    if (lines.length < 1) {
+    if (msgs.length < 1) {
         console.log("Found no new messages!")
-        time = Math.min(time * 2, 10800)
 
     } else {
-        console.log("Found " + lines.length + " new messages~")
-        time = 1000
+        console.log("Found " + msgs.length + " new messages~")
 
         // Scroll
         var log = document.getElementById("log")
 
         console.log(wh + " >= " + (bh - 20))
-        if (wh >= bh - 20) window.scrollBy(0, log.scrollHeight)
+        if (wh >= bh - 100) window.scrollBy(0, log.scrollHeight)
+    }
+}
+
+// addUserlist :: ([String] -> [String]) -> IO ()
+function addUserlist(f){
+    userlist = f(userlist).sort()
+    console.log(userlist.join(','))
+
+    var us = document.getElementById("userlist")
+
+    while (us.children.length > 0) us.removeChild(us.children[0])
+
+    for (var i = 0; i < userlist.length; i++) {
+        var span = document.createElement("span")
+        span.textContent = userlist[i]
+        span.style.color = nickColor(userlist[i])
+
+        us.appendChild(span)
+    }
+
+    var usercount = document.getElementById("usercount")
+    usercount.value = userlist.length
+    flash("color", colors["cyan"], usercount)
+}
+
+// banned :: POSIXTime -> IO ()
+function banned(ts) {
+    flash("backgroundColor", colors["red"], document.getElementById("input"))
+
+    var D = new Date(ts)
+
+    // popup("You are banned until " + D.toUTCString())
+}
+
+// warning :: Int -> IO ()
+function warning(n){
+    if (n === 1) {
+        flash( "backgroundColor"
+             , colors["orange"]
+             , document.getElementById("input")
+             )
+
+        var inp = document.getElementById("input")
+        inp.value = history[history.length - 1]
+
+        var lines = document.getElementsByClassName("line")
+
+
+        var lastown
+        for (var i = 0; i < lines.length; i++)
+            if(lines[i].children[1].textContent === nick) lastown = lines[i]
+
+        lastown.parentNode.removeChild(lastown)
     }
 }
 
@@ -444,7 +560,7 @@ function prepareLine(line){
     }
 
     // Nick coloring
-    if (nick === nickOnly(ni.textContent)) ni.style.color = "%self"
+    if (nick === nickOnly(ni.textContent)) ni.style.color = selfc
     else if (settingGet("colorize-toggle", defaults["colorize-toggle"]))
         ni.style.color = nickColor(nickOnly(ni.textContent))
 
@@ -469,7 +585,7 @@ function prepareLine(line){
         ms.className += " highlight"
         ni.className += " highlight"
 
-        if (settingGet("sound-toggle", defaults["sound-toggle"])) {
+        if (settingGet("sound", defaults["sound"]) === 1) {
             var audio = document.getElementById("audio")
 
             audio.src = settingGet("sound-url", defaults["sound-url"])
@@ -485,6 +601,17 @@ function prepareLine(line){
         nii.className = ""
         ms.innerHTML = ms.innerHTML.replace(/^\u0001ACTION/, nii.outerHTML)
         ni.innerHTML = "<span style=color:" + colors["red"] + ">♥</span>"
+    }
+
+    // Sound
+    if (settingGet("sound", defaults["sound"]) === 0
+    && ni.textContent !== nick) {
+        var audio = document.getElementById("audio")
+
+        audio.src = settingGet("sound-url", defaults["sound-url"])
+        audio.volume =
+            settingGet("sound-volume", defaults["sound-volume"]) / 100
+        audio.play()
     }
 }
 
@@ -505,9 +632,15 @@ function main(){
     // Form submit hijack!
     iw.addEventListener("submit", function(e){
         e.preventDefault()
-        var msg = this.getElementsByName("msg")[0]
+        var msg = document.getElementById("input")
 
-        if (msg.value.length > 0) submit(msg.value)
+        if (msg.value.length > 0) {
+            submit(msg.value)
+
+            flash("backgroundColor", colors["green"], msg)
+
+            msg.value = ""
+        }
     })
 
     var inp = document.getElementById("input")
@@ -536,10 +669,23 @@ function main(){
     inp.addEventListener("keyup", function(e){
         e.stopPropagation()
         if (e.keyCode === 13)
-            if (this.value.length > 0) submit(this.value)
+            if (this.value.length > 0) {
+                submit(this.value)
+
+                flash("backgroundColor", colors["green"], inp)
+
+                this.value = ""
+            }
 
         else if (e.ctrlKey && e.keyCode === 75)
             inp.value += '\u0003'
+    })
+
+    inp.addEventListener("keydown", function(e){
+        e.stopPropagation()
+        if (e.keyCode === 9) {
+            var p = inp.selectionStart
+        }
     })
 
     // Settings open/close events
@@ -563,6 +709,7 @@ function main(){
     var sinps = sef.getElementsByTagName("input")
     for (var i = 0; i < sinps.length; i++) {
         var f = function(e){}
+        var g = function(e){}
 
         if (sinps[i].type === "checkbox") {
             f = function(e){
@@ -580,15 +727,27 @@ function main(){
 
         } else if (sinps[i].type === "range") {
             f = function(e){
-                this.title = this.value
                 localStorage[this.name] = JSON.stringify(parseInt(this.value))
+            }
+
+            g = function(e){
+                this.title = this.value
             }
 
             sinps[i].value = settingGet(sinps[i].name, defaults[sinps[i].name])
             sinps[i].title = sinps[i].value
+
+        } else if (sinps[i].type === "external") {
+            f = function(e){
+                ws.send("set " + this.name + ' ' + this.value)
+
+                flash("backgroundColor", colors["cyan"], this)
+            }
+
         }
 
         sinps[i].addEventListener("blur", f)
+        sinps[i].addEventListener("change", g)
     }
 
     var ssels = sef.getElementsByTagName("select")
@@ -606,27 +765,31 @@ function main(){
         snick.style.color = nickColor(snick.value)
     }
 
-    document.getElementById("input").focus()
+    var size = settingGet("font-size", defaults["font-size"])
+    document.body.style.fontSize = (size > 32 ? 32 : (size < 6 ? 6 : size)) + "pt"
 
-    loadNew("")
-    newLoop()
+    // Stupid browsers keep WebSockets open on refresh!
+    window.onbeforeunload = function() {
+        ws.onclose = function() {}
+        ws.close()
+    }
+
+    // Userlist toggle
+    var us = document.getElementById("usercount")
+    us.addEventListener("click", function(e){
+        var e = document.getElementById("userlist")
+        if (e.style.display === "none") e.style.display = ""
+        else e.style.display = "none"
+    })
+
+    // J-JAM IT IN
+    connect()
 }
 
 // stime :: IO String
 function stime(){
     var ts = document.getElementsByClassName("timestamp")
     return ts[ts.length - 1].name
-}
-
-// newLoop :: IO ()
-function newLoop(){
-    setTimeout(function(){
-        var t = stime()
-        console.log("Loading from timestamp " + t)
-        loadNew(t)
-
-        newLoop()
-    }, time)
 }
 
 </script>
@@ -639,48 +802,58 @@ function newLoop(){
 
 <div id=wrap>
 
+<div id=userlist></div>
 <div id=log></div>
 
-<input>
-
-<form id=inputform method=GET>
-    <div id=inputwrap>
-        <input type=button class=nick id=self value=%nick>
-        <input type=text id=input autocomplete=off name=msg>
-        <input type=hidden name=nick value=%nick>
-    </div>
-</form>
+<input style=opacity:0>
 
 </div>
+
+<form id=inputform method=GET>
+    <table id=inputwrap><tr>
+        <td> <input type=button class=nick id=self value="%nick"> </td>
+        <td style=width:100%>
+            <input style=width:100% type=text id=input autocomplete=off name=msg>
+        </td>
+        <td> <input type=button class=usercount id=usercount value=0> </td>
+    </tr></table>
+</form>
 
 <div id=settings>
 
 <form id=settingsform method=GET>
 
     <span class=line>
-        <span>Avatar: </span> <input class=external type=text name=avatar-url>
+        <span>Avatar: </span> <input type=external name=avatar-url>
     </span><span class=line>
         <span>Avatars? </span> <input type=checkbox name=avatars-toggle>
     </span><span class=line>
         <span>Sound: </span> <input type=text name=sound-url>
     </span><span class=line>
-        <span>Sound? </span> <input type=checkbox name=sound-toggle>
+        <span>Sound? </span>
+        <select name=sound>
+            <option>Every message</option>
+            <option>Highlighted messages</option>
+            <option>Disabled</option>
+        </select>
     </span><span class=line>
         <span>Volume </span> <input type=range min=0 max=100 name=sound-volume>
     </span><span class=line>
         <span>Embedding? </span> <input type=checkbox name=embed-toggle>
     </span><span class=line>
         <span>Timestamp: </span>
-            <select name=timestamp>
-                <option>Full date and time</option>
-                <option>Day and time</option>
-                <option>Time</option>
-                <option>Time (without seconds)</option>
-            </select>
+        <select name=timestamp>
+            <option>Full date and time</option>
+            <option>Day and time</option>
+            <option>Time</option>
+            <option>Time (without seconds)</option>
+        </select>
     </span><span class=line>
         <span>Colorize nicks? </span> <input type=checkbox name=colorize-toggle>
     </span><span class=line>
         <span>Nick length: </span> <input type=range min=1 max=32 name=nick-length>
+    </span><span class=line>
+        <span>Font size: </span> <input type=range min=6 max=32 name=font-size>
     </span>
 
 </form>
