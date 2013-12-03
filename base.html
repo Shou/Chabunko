@@ -79,6 +79,9 @@ table td
     ; border-left: 1px solid %fg
     }
 
+#usercount:hover
+    { background: %hoverbg }
+
 #userlist
     { position: fixed
     ; top: 0
@@ -506,7 +509,7 @@ function addMessage(msgs){
 }
 
 // addUserlist :: ([String] -> [String]) -> IO ()
-function addUserlist(f){
+function addUserlist(f) {
     userlist = f(userlist).sort()
     console.log(userlist.join(','))
 
@@ -546,7 +549,7 @@ function banned(ts) {
 }
 
 // warning :: Int -> IO ()
-function warning(n){
+function warning(n) {
     if (n === 1) {
         flash( "backgroundColor"
              , colors["orange"]
@@ -583,7 +586,7 @@ function setAvatars() {
 }
 
 // prepareLine :: String -> IO ()
-function prepareLine(line){
+function prepareLine(line) {
     var ts = line.children[0]
     var av = line.children[1]
     var ni = line.children[2]
@@ -654,7 +657,7 @@ function prepareLine(line){
 }
 
 // settingGet :: String -> a -> IO a
-function settingGet(s, fallback){
+function settingGet(s, fallback) {
     try {
         return JSON.parse(localStorage[s])
 
@@ -664,7 +667,7 @@ function settingGet(s, fallback){
 }
 
 // main :: IO ()
-function main(){
+function main() {
     var iw = document.getElementById("inputform")
 
     // Form submit hijack!
@@ -817,9 +820,13 @@ function main(){
 
     // Userlist toggle
     var us = document.getElementById("usercount")
+
+    var ue = document.getElementById("userlist")
+    var up = document.getElementById("userlist-pad")
+    ue.style.display = localStorage["userlist-toggle"]
+    up.style.display = localStorage["userlist-toggle"]
+
     us.addEventListener("click", function(e){
-        var e = document.getElementById("userlist")
-        var p = document.getElementById("userlist-pad")
 
         if (localStorage["userlist-toggle"] === "none")
             localStorage["userlist-toggle"] = ""

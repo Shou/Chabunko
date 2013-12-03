@@ -1,6 +1,19 @@
 
--- Copyright (C) Shou 2013
--- Licensed under the GNU GPLv2 license.
+-- Copyright (C) 2013  Shou
+
+-- This program is free software; you can redistribute it and/or
+-- modify it under the terms of the GNU General Public License
+-- as published by the Free Software Foundation; either version 2
+-- of the License, or (at your option) any later version.
+
+-- This program is distributed in the hope that it will be useful,
+-- but WITHOUT ANY WARRANTY; without even the implied warranty of
+-- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-- GNU General Public License for more details.
+
+-- You should have received a copy of the GNU General Public License
+-- along with this program; if not, write to the Free Software
+-- Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 
 -- XXX
@@ -214,7 +227,7 @@ privmsg = do
     space
     dest <- takeWhile1 (/= ' ')
     space
-    char ':'
+    _ <- char ':'
     text <- takeText
     return $ Privmsg nick name host dest text
 
@@ -255,7 +268,7 @@ nullConns nk cns = maybe True ((== 0) . length . M.toList) $ M.lookup nk cns
 
 offSum :: Num a => [a] -> a
 offSum [] = 0
-offSum [x] = 0
+offSum [_] = 0
 offSum (x:y:[]) = x - y
 offSum (x:y:xs) = x - y + offSum (y:xs)
 
@@ -294,7 +307,7 @@ appListen t u c time = do
     mem <- safe . timeout (10^6 * 60) $ receiveData c
     case mem of
         Right Nothing -> do
-            safe (sendTextData c ("ping" :: Text))
+            _ <- safe (sendTextData c ("ping" :: Text))
             verb $ "Ping " <> CI.original u <> " " <> T.pack (show time)
             pong t u c time
 
@@ -329,10 +342,10 @@ consumer t = void . flip runStateT (mempty :: Memory) $ forever $ do
         m@(Memory ks ms cs) <- get
         case cmd of
             -- TODO finish anti-flooding!
-            Post msg -> do
-                verb $ "Received a message from " <> CI.original (msgNick msg)
-                let umsgs = P.take 10 $ filter ((== msgNick msg) . msgNick) ms
-                    times = map (msgTime) $ msg : umsgs
+            Post mg -> do
+                verb $ "Received a message from " <> CI.original (msgNick mg)
+                let umsgs = P.take 10 $ filter ((== msgNick mg) . msgNick) ms
+                    times = map (msgTime) $ mg : umsgs
                     n :: POSIXTime
                     n = product (replicate (length times) 1.1) * genericLength times
                 warn times
@@ -340,9 +353,9 @@ consumer t = void . flip runStateT (mempty :: Memory) $ forever $ do
                 if length umsgs >= 2 && offSum times < n
                 then liftIO $ sendTextData cn ("warn 1" :: Text)
                 else do
-                    put $ m { msgs = P.take 200 $ msg : ms }
+                    put $ m { msgs = P.take 200 $ mg : ms }
 
-                    relay time $ "msgs " <> "[" <> (T.pack . show $ msg) <> "]"
+                    relay time $ "msgs " <> "[" <> (T.pack . show $ mg) <> "]"
 
             Set nk ke va -> do
                 let f = Just . M.insert nk va . maybe mempty id
