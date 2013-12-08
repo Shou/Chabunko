@@ -286,14 +286,15 @@ app t pc = do
         appListen t u c time
   where
     nickInit c = do
-        em <- safe (receiveData c)
+        em <- safe $ receiveData c
         let emnick = flip parseMay name <$> em
         case emnick of
             Right (Just n) -> do
                 verb ("Name: " <> CI.original n)
                 if n == "" then return $ Left () else return $ Right n
             Right Nothing -> do
-                forM_ [erro, void . safe . sendTextData c] ($ ("name <nickname>" :: Text))
+                let da = ($ ("name <nickname>" :: Text))
+                forM_ [warn, void . safe . sendTextData c] da
                 nickInit c
             Left _ -> return $ Left ()
     close c _ = sendClose c ("Connection closed" :: Text) >> return ()
@@ -307,7 +308,7 @@ appListen t u c time = do
     mem <- safe . timeout (10^6 * 60) $ receiveData c
     case mem of
         Right Nothing -> do
-            _ <- safe (sendTextData c ("ping" :: Text))
+            _ <- safe $ sendTextData c ("ping" :: Text)
             verb $ "Ping " <> CI.original u <> " " <> T.pack (show time)
             pong t u c time
 
@@ -318,19 +319,31 @@ appListen t u c time = do
             appListen t u c time
 
         Left _ -> do
-            sendClose c ("Connection closed" :: Text)
+            sendClose c ("appListen: Connection closed" :: Text)
             atomically . putTMVar t . Left . CmdWrap time c $ End u
 
 -- | Wait 10 seconds for a response to a ping before closing the socket.
 pong :: TMVar CmdConn -> Nick -> Connection -> POSIXTime -> IO ()
 pong t u c time = do
-    mm <- timeout (10^6 * 10) $ receiveData c
-    case mm of
-        Nothing -> warn $ "Connection timeout for " <> u
-        Just (m :: Text) ->
+    emm <- safe . timeout (10^6 * 10) $ receiveData c
+    case emm of
+        Left _ -> do
+            let da = ($ ("pong: Connection closed" :: Text))
+            forM_ [void . safe . sendClose c, warn] da
+            atomically . putTMVar t . Left . CmdWrap time c $ End u
+        Right Nothing -> do
+            warn $ "Connection timeout for " <> u
+            let da = ($ "Ping timeout: " <> CI.original u)
+            forM_ [void . safe . sendClose c, warn] da
+            atomically . putTMVar t . Left . CmdWrap time c $ End u
+        Right (Just (m :: Text)) ->
             if CI.mk m == "pong"
-            then appListen t u c time
-            else forM_ [void . safe . sendClose c, warn] ($ "Ping timeout: " <> CI.original u)
+            then do
+                verb ("Pong " <> CI.original u <> " " <> T.pack (show time))
+                appListen t u c time
+            else do
+                let da = ($ "Ping timeout: " <> CI.original u)
+                forM_ [void . safe . sendClose c, warn] da
 
 -- TODO
 -- TODO split up, make `consumePost', `consumeReq', `consumeBan', etc
@@ -400,16 +413,7 @@ consumer t = void . flip runStateT (mempty :: Memory) $ forever $ do
                 then return ()
                 else sendTextData cn ("ban 0" :: Text)
 
-            End nk -> do
-                let cs' = M.alter (fmap $ M.delete time) nk cs
-                    empty = nullConns nk cs'
-                    f = if empty then M.delete nk else id
-
-                put $ m { conns = f cs' }
-
-                when empty . void . safeSt $ do
-                    let nick = encode . showJSON $ CI.original nk
-                    relay time $ "quit " <> T.pack nick
+            End nk -> cEnd nk time
 
         liftIO $ print cmd
   where
@@ -420,6 +424,20 @@ consumer t = void . flip runStateT (mempty :: Memory) $ forever $ do
 
         let f = Just . M.insert ts cn . maybe mempty id
         put $ m { conns = M.alter f nk $ conns m }
+
+cEnd :: Nick -> POSIXTime -> StateT Memory IO ()
+cEnd nk time = do
+    m@(Memory ks ms cs) <- get
+
+    let cs' = M.alter (fmap $ M.delete time) nk cs
+        empty = nullConns nk cs'
+        f = if empty then M.delete nk else id
+
+    put $ m { conns = f cs' }
+
+    when empty . void . safeSt $ do
+        let nick = encode . showJSON $ CI.original nk
+        relay time $ "quit " <> T.pack nick
 
 -- | Relay a message to all other sockets.
 relay :: POSIXTime -> Text -> StateT Memory IO ()
@@ -434,16 +452,7 @@ relay time te = do
             e <- liftIO . safe $ sendTextData cn te
             case e of
                 Right _ -> return ()
-                Left _ -> do
-                    m <- get
-                    let cs' = M.alter (fmap $ M.delete time) nk cs
-                        empty = nullConns nk cs'
-                        f = if empty then M.delete nk else id
-
-                    put $ m { conns = f cs' }
-
-                    when empty . void . safeSt $ do
-                        relay time $ "quit " <> (quote . escape $ CI.original nk)
+                Left _ -> cEnd nk time
 
 ircWrite _ _ = return ()
 
