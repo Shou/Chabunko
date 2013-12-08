@@ -122,6 +122,29 @@ table td
     ; color: %fg
     }
 
+#popup
+    { width: 100%
+    ; height: 100%
+    ; top: 0
+    ; left: 0
+    ; position: fixed
+    ; background-color: transparent
+    ; display: none
+    }
+
+#popup > div
+    { border-radius: 15px 15px
+    ; background-color: rgba(0, 0, 0, 0.5)
+    ; color: white
+    ; font-size: 20pt 
+    ; width: 50%
+    ; margin: 25% auto
+    ; overflow: hidden
+    ; text-shadow: 0 0 1px black
+    ; box-shadow: 0 0 5px black
+    ; text-align: center
+    }
+
 .timestamp
     { color: %info
     ; padding: 0pt 8pt
@@ -205,8 +228,13 @@ var selfc = "%self"
 // userlist :: [Nick]
 var userlist = []
 
-// history :: [String]
-var history = []
+// | History index.
+// hindex :: Int
+var hindex = 0
+
+// | Draft message, not from history.
+// hcurrent :: String
+var hcurrent = ""
 
 // avatars :: Object Nick String
 var avatars = {}
@@ -243,6 +271,10 @@ var defaults =
 var ws = null
 
 
+// id :: a -> a
+function id (x) { return x }
+
+
 // connect :: IO ()
 function connect(){
     ws = new WebSocket("ws://nitori.shou.io:8088/")
@@ -260,6 +292,10 @@ function connect(){
 
     ws.onclose = function(e){
         ws = null
+
+        popup("Reconnecting...")
+
+        connect()
     }
 
     ws.onmessage = function(e){
@@ -314,6 +350,18 @@ function flash(s, c, e){
     setTimeout(function(){ e.style[s] = "" }, 1000)
 }
 
+// popup :: String -> IO ()
+function popup(s) {
+    var p = document.getElementById("popup")
+
+    p.children[0].textContent = s
+    p.style.display = "block"
+
+    setTimeout(function() {
+        p.style.display = "none"
+    }, 2000)
+}
+
 // submit :: String -> IO ()
 function submit(s){
     ws.send("msg " + s)
@@ -322,7 +370,11 @@ function submit(s){
 
     addMessage([{ nick: nick, time: time, msg: s }])
 
-    history.push(s)
+    history(function(hs) {
+        hs.unshift(s)
+        hindex = hs.length
+        return hs
+    })
 }
 
 // nickColor :: String -> String
@@ -481,6 +533,7 @@ function addMessage(msgs){
         ts.title = (new Date(msgs[i].time * 1000)).toUTCString()
         av.src = avatars[msgs[i].nick] ? avatars[msgs[i].nick] : ""
         ni.textContent = msgs[i].nick
+        ni.title = msgs[i].nick
         ms.textContent = msgs[i].msg
 
         line.appendChild(ts)
@@ -545,7 +598,7 @@ function banned(ts) {
 
     var D = new Date(ts)
 
-    // popup("You are banned until " + D.toUTCString())
+    popup("You are banned until " + D.toUTCString())
 }
 
 // warning :: Int -> IO ()
@@ -557,7 +610,12 @@ function warning(n) {
              )
 
         var inp = document.getElementById("input")
-        inp.value = history[history.length - 1]
+        history(function(hs) {
+            inp.value = hs[hs.length - 1]
+            hs = hs.slice(0, hs.length - 1)
+            hindex = hs.length
+            return hs
+        })
 
         var lines = document.getElementsByClassName("line")
 
@@ -666,6 +724,24 @@ function settingGet(s, fallback) {
     }
 }
 
+// history :: ([String] -> [String]) -> IO [String]
+function history(f) {
+    var h = localStorage["history"]
+    var hs = []
+
+    try {
+        hs = f(JSON.parse(h))
+
+    } catch(e) {
+        console.log(e)
+        hs = f(hs)
+    }
+
+    localStorage["history"] = JSON.stringify(hs.slice(0, 200))
+
+    return hs
+}
+
 // main :: IO ()
 function main() {
     var iw = document.getElementById("inputform")
@@ -718,14 +794,32 @@ function main() {
                 this.value = ""
             }
 
-        else if (e.ctrlKey && e.keyCode === 75)
-            inp.value += '\u0003'
+        else if (e.ctrlKey && e.keyCode === 75) inp.value += '\u0003'
+
     })
 
     inp.addEventListener("keydown", function(e){
         e.stopPropagation()
         if (e.keyCode === 9) {
             var p = inp.selectionStart
+
+        } else if (e.keyCode === 38) {
+            if (hindex === history(id).length) {
+                hcurrent = inp.value
+            }
+
+            if (hindex > 0) {
+                hindex--
+                inp.value = history(id)[hindex]
+            }
+
+        } else if (e.keyCode === 40) {
+            if (hindex < history(id).length) {
+                hindex++
+                if (hindex === history(id).length) inp.value = hcurrent
+                else inp.value = history(id)[hindex]
+            }
+
         }
     })
 
@@ -863,7 +957,6 @@ function stime(){
 
 <div id=log></div>
 
-<!-- >not being a lazy programmer; >2013 -->
 <input style=opacity:0>
 
 </div>
@@ -917,6 +1010,10 @@ function stime(){
 
 </form>
 
+</div>
+
+<div id=popup>
+    <div></div>
 </div>
 
 <audio id=audio>
