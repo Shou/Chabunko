@@ -21,6 +21,7 @@
 
 import           Blaze.ByteString.Builder.ByteString (fromByteString)
 
+import           Control.Error
 import           Control.Monad.State
 import           Control.Monad.Trans.Resource
 
@@ -35,6 +36,8 @@ import qualified Data.Text.IO                        as T
 import           Network.HTTP.Types
 import           Network.Wai
 import           Network.Wai.Handler.Warp            hiding (Handle)
+
+import           System.Environment
 
 -- }}}
 
@@ -72,7 +75,8 @@ ircOut req = do
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
 
 def :: [(Text, Text)]
-def = [ ("bg", "#fcfcfc")
+def = [ ("chan", "home")
+      , ("bg", "#fcfcfc")
       , ("fg", "#101010")
       , ("link", "blue")
       , ("font", "Consolas, monospace")
@@ -118,6 +122,11 @@ res t = ResponseBuilder
 
 main :: IO ()
 main = do
+    as <- getArgs
+    let n = case as of
+            (sn:_) -> maybe 8008 id $ readMay sn
+            [] -> 8008
+        cfg = settings { settingsPort = n }
     debug "Starting server..."
-    runSettings settings app
+    runSettings cfg app
 

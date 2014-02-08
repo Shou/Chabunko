@@ -221,6 +221,11 @@ span.line > .message
 
 // nick :: Nick
 var nick = "%nick"
+if (nick[0] === '%') nick = "Guest"
+
+// chan :: String
+var chan = "%chan"
+if (chan[0] === '%') chan = "home"
 
 // selfc :: String
 var selfc = "%self"
@@ -277,15 +282,16 @@ function id (x) { return x }
 
 // connect :: IO ()
 function connect(){
-    ws = new WebSocket("ws://nitori.shou.io:8088/")
+    ws = new WebSocket("ws://localhost:8088/")
 
     ws.onopen = function(){
         console.log("Connected!")
 
         ws.send("name " + nick)
-        ws.send("req 0")
-        ws.send("list")
-        ws.send("opt avatar-url")
+        ws.send("join " + chan)
+        ws.send("req " + chan + " 0")
+        ws.send("list " + chan)
+        ws.send("opt " + chan + " avatar-url")
     }
 
     ws.onerror = function(e){ console.log(e) }
@@ -364,7 +370,7 @@ function popup(s) {
 
 // submit :: String -> IO ()
 function submit(s){
-    ws.send("msg " + s)
+    ws.send("msg " + chan + ' ' + s)
 
     var time = (new Date()).getTime() / 1000
 
