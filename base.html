@@ -263,7 +263,7 @@ var colorints =
 
 var defaults =
     { "avatars-toggle": true
-    , "sound": 1
+    , "sound": 0
     , "sound-volume": 50
     , "embed-toggle": true
     , "timestamp": 1
@@ -374,7 +374,7 @@ function submit(s){
 
     var time = (new Date()).getTime() / 1000
 
-    addMessage([{ nick: nick, time: time, msg: s }])
+    addMessage([{ nick: nick, chan: chan, time: time, msg: s }])
 
     history(function(hs) {
         hs.unshift(s)
@@ -522,35 +522,37 @@ function addMessage(msgs){
     var bh = document.body.scrollHeight
 
     for (var i = 0; i < msgs.length; i++) {
-        var line = document.createElement("span")
-        var ts = document.createElement("span")
-        var av = document.createElement("img")
-        var ni = document.createElement("span")
-        var ms = document.createElement("span")
+        if (msgs[i].chan === chan) {
+            var line = document.createElement("span")
+            var ts = document.createElement("span")
+            var av = document.createElement("img")
+            var ni = document.createElement("span")
+            var ms = document.createElement("span")
 
-        line.className = "line"
-        ts.className = "timestamp"
-        av.className = "avatar"
-        ni.className = "nick"
-        ms.className = "message"
+            line.className = "line"
+            ts.className = "timestamp"
+            av.className = "avatar"
+            ni.className = "nick"
+            ms.className = "message"
 
-        ts.textContent = formatTime(msgs[i].time)
-        ts.name = msgs[i].time
-        ts.title = (new Date(msgs[i].time * 1000)).toUTCString()
-        av.src = avatars[msgs[i].nick] ? avatars[msgs[i].nick] : ""
-        ni.textContent = msgs[i].nick
-        ni.title = msgs[i].nick
-        ms.textContent = msgs[i].msg
+            ts.textContent = formatTime(msgs[i].time)
+            ts.name = msgs[i].time
+            ts.title = (new Date(msgs[i].time * 1000)).toUTCString()
+            av.src = avatars[msgs[i].nick] ? avatars[msgs[i].nick] : ""
+            ni.textContent = msgs[i].nick
+            ni.title = msgs[i].nick
+            ms.textContent = msgs[i].msg
 
-        line.appendChild(ts)
-        line.appendChild(av)
-        line.appendChild(ni)
-        line.appendChild(ms)
+            line.appendChild(ts)
+            line.appendChild(av)
+            line.appendChild(ni)
+            line.appendChild(ms)
 
-        var log = document.getElementById("log")
-        log.appendChild(line)
+            var log = document.getElementById("log")
+            log.appendChild(line)
 
-        prepareLine(line)
+            prepareLine(line)
+        }
     }
 
     if (msgs.length < 1) {
