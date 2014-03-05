@@ -17,14 +17,18 @@
 
 
 -- XXX
+-- - How to hand out settings for users who have previously posted in the chan
+--   but are not currently in it???
+--      - Offline status?
 
 -- FIXME
 --  - Warning send: invalid argument (Bad file descriptor)
 --      - w0t
+--  - Per server `ircout' TMVar, race condition occurs otherwise.
+--      - In theory should work now.
 
 -- TODO
 --  - Channels
---      - Channel based Req
 --      - Per-channel based logs
 --  - Banning
 --      - User data
@@ -32,9 +36,18 @@
 --          - How will it affect the structure of the software?
 --  - IRC
 --      - Track online users?
---      - Relay messages
---      - Reconnect
---      - Multiple servers
+--          - Remove all users on disconnect.
+--          - Quit, Part, Join, etc modifies list.
+--          - Distinguish IRC users from client users in both data and on
+--            display.
+--      - Reconnect.
+--      - Multiple servers.
+--          - Parsing part remaining!
+--              - Parsers work, but not the data.
+--              - Is server even required for all of them?
+--          - Per server `ircout' TMVar, otherwise a race occurs for reads.
+--              - Done???
+--      - Only write if channel is in `channels' in `ircListen'
 -- - Send message back to sender
 --      - Better anti-spam response
 
@@ -108,6 +121,7 @@ data Cmd = Post { postMsg :: Msg }
 
 data Msg = Msg { msgNick :: Nick
                , msgChan :: Key
+               , msgServ :: String
                , msgTime :: POSIXTime
                , msgText :: Text
                }
@@ -128,16 +142,17 @@ data Status = Banned POSIXTime
             | Online
             | Mod
             | Admin
-            deriving (Show)
+            deriving (Eq, Show)
 
 data Input = InCmd CmdWrap
            | InCon NewConn
            | InIRC Privmsg
 
 instance Show Msg where
-    show (Msg ni ch ts mg) = encodeStrict . makeObj $
+    show (Msg ni ch se ts mg) = encodeStrict . makeObj $
         [ ("nick", showJSON . T.unpack $ CI.original ni)
         , ("chan", showJSON . T.unpack $ CI.original ch)
+        , ("serv", showJSON se)
         , ("time", showJSON (realToFrac ts :: Double))
         , ("msg", showJSON $ T.unpack mg)
         ]
@@ -160,27 +175,27 @@ data Privmsg = Privmsg { privNick :: Nick
                        , privName :: Text
                        , privHost :: Text
                        , privDest :: Text
+                       , privServ :: String
                        , privText :: Text
                        } deriving (Show)
+
+data Server = Server { ircServer :: String
+                     , ircPort :: PortNumber
+                     , ircNick :: Text
+                     , ircChans :: [Text]
+                     }
+
+type IRCTMVars = Map String (TMVar Privmsg)
 
 -- }}}
 
 -- {{{ Constants
 
--- | IRC nickname
-nick :: Text
-nick = "Chabunko"
+servers = [ rizon, adelais ]
 
--- | Server hostname
-server :: String
-server = "irc.rizon.net"
+rizon = Server "irc.rizon.net" 6667 "Chabunko" [ "tac", "bnetmlp", "thecircle" ]
 
--- | IRC server port number
-port = 6667
-
--- | IRC server channels
-channels :: [Text]
-channels = [ "bnetmlp", "tac" ]
+adelais = Server "irc.adelais.net" 6667 "Chabunko" [ "tac" ]
 
 -- }}}
 
@@ -198,6 +213,7 @@ erro x = liftIO $ putStrLn $ "\x1b[0;31mError " <> show x <> "\x1b[0m"
 -- }}}
 
 -- {{{ Parsing
+-- TODO servers
 
 name :: Parser Nick
 name = do
@@ -205,18 +221,21 @@ name = do
     space
     CI.mk <$> takeText
 
--- TODO channels
 msg :: Nick -> POSIXTime -> Parser Cmd
 msg n t = do
     asciiCI "msg"
     space
+    s <- T.unpack <$> takeWhile1 (/= ' ')
+    space
     c <- CI.mk <$> takeWhile1 (/= ' ')
     space
-    Post . Msg n c t <$> takeText
+    Post . Msg n c s t <$> takeText
 
 opt :: Parser Cmd
 opt = do
     asciiCI "opt"
+    space
+    s <- T.unpack <$> takeWhile1 (/= ' ')
     space
     c <- CI.mk <$> takeWhile1 (/= ' ')
     space
@@ -233,6 +252,8 @@ set n = do
 enter :: Nick -> Parser Cmd
 enter n = do
     asciiCI "join"
+    space
+    s <- T.unpack <$> takeWhile1 (/= ' ')
     space
     Join n . CI.mk <$> takeWhile1 (/= ' ')
 
@@ -252,6 +273,8 @@ req :: Nick -> Parser Cmd
 req n = do
     asciiCI "req"
     space
+    s <- T.unpack <$> takeWhile1 (/= ' ')
+    space
     c <- CI.mk <$> takeWhile1 (/= ' ')
     space
     mt <- readMay . T.unpack <$> takeWhile1 isDigit
@@ -260,6 +283,8 @@ req n = do
 list :: Parser Cmd
 list = do
     asciiCI "list"
+    space
+    s <- T.unpack <$> takeWhile1 (/= ' ')
     space
     c <- CI.mk <$> takeWhile1 (/= ' ')
     return $ List c
@@ -292,8 +317,8 @@ ircUser = do
     space
     return $ (nick, name, host)
 
-privmsg :: Parser Privmsg
-privmsg = do
+privmsg :: String -> Parser Privmsg
+privmsg s = do
     (nick, name, host) <- ircUser
     string "PRIVMSG"
     space
@@ -302,7 +327,7 @@ privmsg = do
     space
     _ <- char ':'
     text <- takeText
-    return $ Privmsg nick name host dest text
+    return $ Privmsg nick name host dest s text
 
 -- }}}
 
@@ -339,6 +364,7 @@ quote x = "\"" <> x <> "\""
 nullConns :: Nick -> Users -> Bool
 nullConns nk cns = maybe True ((== 0) . length . M.toList . userConns) $ M.lookup nk cns
 
+-- | w0t
 offSum :: Num a => [a] -> a
 offSum [] = 0
 offSum [_] = 0
@@ -348,6 +374,20 @@ offSum (x:y:xs) = x - y + offSum (y:xs)
 -- | Filter users by which have a certain channel in their `userChans'.
 chanUsers :: Key -> Users -> Users
 chanUsers c = M.filter (elem c . userChans)
+
+onlineUsers :: Users -> Users
+onlineUsers = M.filter ((== Online) . userStat)
+
+colorize :: Text -> Text
+colorize nk = "\ETX" <> colorOf nk <> nk <> "\ETX"
+
+colorOf :: Text -> Text
+colorOf nk = T.pack $ colors !! (sum (map ord snick) `mod` length colors)
+  where
+      snick = T.unpack nk
+      colors = [ "03", "04", "06", "08", "09", "10", "11", "12", "13" ]
+
+cimap f = CI.mk . f . CI.original
 
 -- }}}
 
@@ -368,7 +408,9 @@ app t pc = do
         case emnick of
             Right (Just n) -> do
                 verb ("Name: " <> CI.original n)
-                if n == "" then return $ Left () else return $ Right n
+                if n == ""
+                then return $ Left ()
+                else return $ Right (cimap (T.take 21) n)
             Right Nothing -> do
                 let da = ($ ("name <nickname>" :: Text))
                 forM_ [warn, void . safe . sendTextData c] da
@@ -424,9 +466,10 @@ pong t u c time = do
 
 -- TODO channels
 -- TODO split up, make `consumePost', `consumeReq', `consumeBan', etc
+-- TODO warn client on server missing
 -- | The "core" that talks to everything else.
-consumer :: TMVar Input -> TMVar Privmsg -> IO ()
-consumer t o = void . flip runStateT (mempty :: Memory) $ forever $ do
+consumer :: TMVar Input -> IRCTMVars -> IO ()
+consumer t mts = void . flip runStateT (mempty :: Memory) $ forever $ do
     e <- liftIO . atomically $ takeTMVar t
     m@(Memory us cf ms) <- get
     case e of
@@ -436,7 +479,7 @@ consumer t o = void . flip runStateT (mempty :: Memory) $ forever $ do
             liftIO $ print p
             time <- liftIO $ getPOSIXTime
             let c = CI.mk $ privDest p
-                mg = Msg (privNick p) c time (privText p)
+                mg = Msg (privNick p) c (privServ p) time (privText p)
 
             put $ m { msgs = P.take 1000 $ mg : ms }
             relay (Just c) 0 $ "msgs " <> "[" <> (T.pack . show $ mg) <> "]"
@@ -444,42 +487,72 @@ consumer t o = void . flip runStateT (mempty :: Memory) $ forever $ do
         InCmd (CmdWrap time cn cmd) -> (liftIO $ print cmd) >> case cmd of
             -- TODO finish anti-flooding!
             -- | Post a message
-            Post mg@(Msg nk ch ts te) -> do
+            Post mg@(Msg nk ch se ts te) -> do
                 verb $ "Received a message from " <> CI.original nk
                 let c = msgChan mg
                     umsgs = P.take 10 $ filter ((== nk) . msgNick) ms
                     times = map msgTime $ mg : umsgs
                     n :: POSIXTime
-                    n = product (replicate (length times) 1.1) * genericLength times
+                    n = 1.1 ^ genericLength times * genericLength times
                 warn times
                 warn $ show (offSum times) <> " < " <> show n
                 if length umsgs >= 2 && offSum times < n
                 then liftIO $ sendTextData cn ("warn 1" :: Text)
                 else do
-                    put $ m { msgs = P.take 200 $ mg : ms }
-                    let p = Privmsg nk "" "" (CI.original c) te
+                    let p = Privmsg nk "" "" (CI.original c) se te
 
-                    liftIO $ print 1
-                    liftIO . atomically $ putTMVar o p
-                    liftIO $ print 2
+                        mo = M.lookup se mts
 
-                    relay (Just c) time $ "msgs " <> "[" <> (T.pack . show $ mg) <> "]"
+                    case mo of
+                        Just o -> do
+                            liftIO $ print 1
+                            liftIO . atomically $ putTMVar o p
+                            liftIO $ print 2
 
+                            -- TODO relay to sender client, done!
+                            relay Nothing 0 $ mconcat [ "msgs ", "["
+                                                      , T.pack . show $ mg
+                                                      , "]"
+                                                      ]
+                            put $ m { msgs = P.take 200 $ mg : ms }
+
+                        _ | se == "localhost" -> do
+                            relay Nothing 0 $ mconcat [ "msgs ", "["
+                                                      , T.pack . show $ mg
+                                                      , "]"
+                                                      ]
+                            put $ m { msgs = P.take 200 $ mg : ms }
+
+                          | otherwise -> do
+                            warn $ "Invalid server " <> se
+                            liftIO $ sendTextData cn ("warn 2" :: Text)
+
+            -- TODO quote??? json error!!
             -- | Join a channel
             Join nk c -> do
                 m <- get
                 let cus = chanUsers c $ users m
                 when (nullConns nk cus) . void . safeSt $ do
-                    relay (Just c) time $ "join " <> (quote . escape $ CI.original nk)
+                    relay (Just c) time $ mconcat [ "join "
+                                                  , quote . escape $ CI.original nk
+                                                  ]
 
                 let du = Just $ User nk Online (M.singleton time cn) [c]
-                    f = maybe du Just . fmap (\u -> u { userChans = c : userChans u})
+                    f = maybe du Just . fmap (\u -> u
+                        { userChans = nub $ c : userChans u
+                        , userStat = Online
+                        })
                 put $ m { users = M.alter f nk $ users m }
 
             -- TODO
             -- | Part a channel
             Part nk c -> do
-                return ()
+                let f u = Just $ u { userStat = Offline }
+                put $ m { users = M.update f nk $ users m }
+
+                relay (Just c) time $ mconcat [ "part ", CI.original c
+                                              , " ", CI.original nk
+                                              ]
 
             -- | Set a config value
             Set nk ke va -> do
@@ -494,10 +567,11 @@ consumer t o = void . flip runStateT (mempty :: Memory) $ forever $ do
                               ) ]
                 relay Nothing time $ "set " <> T.pack (encodeStrict tu)
 
+            -- TODO channels
             -- | Return all values from users under an option
             Opt c ke -> liftIO $ do
                 let cus :: Map Nick Text
-                    cus = M.intersection (maybe mempty id $ M.lookup ke cf) (chanUsers c us)
+                    cus = M.intersection (maybe mempty id $ M.lookup ke cf) us
                     pave (f, s) = (T.unpack $ CI.original f, showJSON s)
                     cus' :: [(String, JSValue)]
                     cus' = [ ( T.unpack . CI.original $ ke
@@ -511,7 +585,6 @@ consumer t o = void . flip runStateT (mempty :: Memory) $ forever $ do
                 let cf' = map CI.original $ M.keys cf
                 sendTextData cn $ "opts " <> T.pack (encodeStrict $ showJSON cf')
 
-            -- TODO channels
             -- | Request log messages
             Req nk c ts -> do
                 liftIO $ print ms
@@ -520,11 +593,12 @@ consumer t o = void . flip runStateT (mempty :: Memory) $ forever $ do
                     ls = "[" <> T.intercalate "," (reverse ums') <> "]"
                 liftIO . void . safe $ sendTextData cn $ "msgs " <> ls
 
+            -- TODO make list into an object with channel data
             -- | List users
             List c -> do
                 verb us
                 verb $ chanUsers c us
-                let cus = chanUsers c us
+                let cus = onlineUsers $ chanUsers c us
                     usl = encodeStrict . showJSON . map CI.original $ M.keys cus
                 liftIO . void . safe $ sendTextData cn $ "list " <> T.pack usl
 
@@ -552,11 +626,12 @@ cEnd :: Nick -> POSIXTime -> StateT Memory IO ()
 cEnd nk time = do
     m@(Memory us cf ms) <- get
 
-    let us' = M.alter (fmap (\u -> u { userConns = M.delete time $ userConns u })) nk us
+    let us' = M.update (\u -> Just $ u { userConns = M.delete time $ userConns u
+                                       , userStat = Offline
+                                       }) nk us
         empty = nullConns nk us'
-        f = if empty then M.delete nk else id
 
-    put $ m { users = f us' }
+    put $ m { users = us' }
 
     when empty . void . safeSt $ do
         let nick = encode . showJSON $ CI.original nk
@@ -591,7 +666,7 @@ ircListen :: TMVar Privmsg -> Handle -> IO ()
 ircListen o h = forever $ do
     p <- atomically $ takeTMVar o
     let mg = mconcat [ "PRIVMSG #", privDest p, " :"
-                     , CI.original $ privNick p, ": ",  privText p
+                     , colorize . CI.original $ privNick p, ": ",  privText p
                      ]
     ircWrite h mg
 
@@ -603,9 +678,9 @@ ircPing h l = do
     else print l
 
 -- | Run IRC
-runIRC :: TMVar Privmsg -> TMVar Input -> IO ()
-runIRC ircout ircin = do
-    h <- connectTo server (PortNumber $ fromIntegral port)
+runIRC :: TMVar Privmsg -> TMVar Input -> Server -> IO ()
+runIRC ircout ircin (Server host port nick channels) = do
+    h <- connectTo host (PortNumber $ fromIntegral port)
     utf8t <- mkTextEncoding "UTF-8//TRANSLIT"
     hSetEncoding h utf8t
     hSetBuffering h LineBuffering
@@ -618,7 +693,7 @@ runIRC ircout ircin = do
     void . forkIO . forever $ do
         l <- T.hGetLine h
         ircPing h l
-        let mp = parseMay l privmsg
+        let mp = parseMay l (privmsg host)
         maybe (return ()) verb mp
         maybe (return ()) (atomically . putTMVar ircin . InIRC) mp
   where
@@ -635,8 +710,11 @@ main = do
             (sn:_) -> maybe 8088 id $ readMay sn
             [] -> 8088
     tcc <- newEmptyTMVarIO
-    ircout <- newEmptyTMVarIO
-    _ <- forkIO $ consumer tcc ircout
-    _ <- forkIO $ runIRC ircout tcc
+--    mts <- fmap M.fromList . forM servers $ \s -> do
+--        ircout <- newEmptyTMVarIO
+--        void . forkIO $ runIRC ircout tcc s
+--        return (ircServer s, ircout)
+    let mts = mempty
+    _ <- forkIO $ consumer tcc mts
     runServer "0.0.0.0" n (app tcc)
 

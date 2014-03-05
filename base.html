@@ -1,20 +1,41 @@
 <!DOCTYPE html>
 
+
+<!--
+TODO
+    - Redesign UI.
+        - Take inspo from modern chats?
+            - Square, flat speech bubbles.
+            - Receiver and sender left and right aligned respectively.
+            - I don't want to just copy something. Incorporate other elements.
+-->
+
 <html>
 
 <head>
 
 <title>Chabunko</title>
 
+<meta charset=utf-8>
+<meta content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0' name='viewport' />
+<meta name="viewport" content="width=device-width" />
+<link rel="shortcut icon" href=/favicon.png type=image/png>
+
 <!-- {{{ CSS -->
 
 <style type=text/css>
+
+@font-face
+    { font-family: "Junction Regular"
+    ; src: url("/Junction-webfont.woff") format("woff")
+         , url("/Junction-webfont.ttf") format("truetype")
+    }
 
 html, body
     { padding: 0
     ; margin: 0
     ; font-family: %font
-    ; font-size: %size
+    ; font-size: 1em
     ; background: %bg
     ; color: %fg
     }
@@ -26,7 +47,7 @@ input
     ; background: %panelbg
     ; border: none
     ; font-family: %font
-    ; font-size: %size
+    ; font-size: 1em
     }
 
 table
@@ -52,7 +73,9 @@ table td
     }
 
 #inputwrap
-    { box-shadow: 0 0 5px %fg }
+    { box-shadow: 0 0 5px %fg
+    ; padding: 0.2em 0
+    }
 
 #input
     { overflow: hidden
@@ -76,7 +99,6 @@ table td
     { color: %fg
     ; background: %panelbg
     ; margin: 0
-    ; border-left: 1px solid %fg
     }
 
 #usercount:hover
@@ -89,10 +111,13 @@ table td
     ; width: 100%
     ; background: %panelbg
     ; box-shadow: 0 0 5px %fg
+    ; border: 0 0.4em
+    ; z-index: 1
+    ; padding: 0.2em 0
     }
 
 #userlist > *
-    { margin-left: %size }
+    { margin-left: 1em }
 
 #settings
     { width: 100%
@@ -136,7 +161,7 @@ table td
     { border-radius: 15px 15px
     ; background-color: rgba(0, 0, 0, 0.5)
     ; color: white
-    ; font-size: 20pt 
+    ; font-size: 3em
     ; width: 50%
     ; margin: 25% auto
     ; overflow: hidden
@@ -147,51 +172,69 @@ table td
 
 .timestamp
     { color: %info
-    ; padding: 0pt 8pt
+    ; padding: 0.3em 0.3em
+    ; font-size: 0.7em
+    ; text-align: right
+    ; position: absolute
+    ; bottom: 0
+    ; right: 0
+    ; text-shadow: 0 0 1px white, 0 0 1px white
+    }
+
+.message
+    { vertical-align: middle
+    ; padding: 0.5em 0
     }
 
 .avatar
-    { max-width: 24px
-    ; max-height: 24px
+    { max-width: 48px
+    ; max-height: 48px
+    ; display: block
     }
 
-.nick
+.avatar:hover + span.nick
+    { display: block }
+
+span.nick
     { color: #bb88dd
-    ; text-align: right
-    ; padding: 0pt 8pt
-    ; border-right: 1px solid %fg
-    ; max-width: 100pt
     ; text-overflow: ellipsis
     ; overflow: hidden
+    ; font-size: 0.7em
+    ; text-align: center
+    ; display: none
+    ; padding: 0.5em 0
     }
 
 .botnick:before
     { content: "• " }
 
-.message
-    { padding: 0pt 9pt
-    ; width: 100%
+.lineuser
+    { float: left
+    ; text-overflow: ellipsis
+    ; overflow: hidden
     }
 
+.linecon
+    {}
+
+.linewrap, .linemeta
+    { display: block }
+
 span.line
-    { display: table-row }
-
-span.line:nth-child(odd)
-    { background: %oddbg }
-
-span.line:nth-child(even)
-    { background: %evenbg }
+    { display: block
+    ; margin: 10px 10px
+    }
 
 span.line:hover
     { background: %hoverbg }
 
-span.line > span
-    { display: table-cell
-    ; white-space: pre
+span.linewrap
+    { display: inline-block
+    ; background-color: %oddbg
+    ; position: relative
+    ; min-width: 128px
+    ; box-shadow: 0 1px 2px
     }
-
-span.line > .message
-    { white-space: pre-wrap }
 
 .embed
     { max-height: 64px
@@ -219,13 +262,18 @@ span.line > .message
 
 <script type=text/javascript>
 
+// {{{ Variables
+
 // nick :: Nick
 var nick = "%nick"
 if (nick[0] === '%') nick = "Guest"
 
 // chan :: String
 var chan = "%chan"
-if (chan[0] === '%') chan = "home"
+if (chan[0] === '%') chan = "main"
+
+var serv = "%serv"
+if (serv[0] === '%') serv = "localhost"
 
 // selfc :: String
 var selfc = "%self"
@@ -243,6 +291,17 @@ var hcurrent = ""
 
 // avatars :: Object Nick String
 var avatars = {}
+
+// | Websocket variable
+// ws :: WebSocket
+var ws = null
+
+// popupc :: Int
+var popupc = 0
+
+// }}}
+
+// {{{ Constants
 
 // colors :: Object String String
 var colors =
@@ -273,25 +332,47 @@ var defaults =
     , "font-size": 9
     }
 
-var ws = null
+// }}}
 
+// {{{ Utils
 
 // id :: a -> a
 function id (x) { return x }
 
+// | No more Flydom!
+// speedcore :: String -> Obj -> Tree -> DOMObj
+function speedcore(tagname, attrs, childs) {
+    var e = document.createElement(tagname);
+    for (k in attrs){
+        if (typeof attrs[k] === "object")
+            for (l in attrs[k])
+                e[k][l] = attrs[k][l];
+        else e[k] = attrs[k];
+    }
+    for (var i = 0; i < childs.length; i = i + 3){
+        var el = speedcore( childs[i]
+                          , childs[i + 1]
+                          , childs[i + 2]
+                          );
+        e.appendChild(el);
+    }
+    return e;
+}
+
+// }}}
 
 // connect :: IO ()
 function connect(){
-    ws = new WebSocket("ws://localhost:8088/")
+    ws = new WebSocket("ws://" + window.location.hostname + ":8088/")
 
     ws.onopen = function(){
         console.log("Connected!")
 
         ws.send("name " + nick)
-        ws.send("join " + chan)
-        ws.send("req " + chan + " 0")
-        ws.send("list " + chan)
-        ws.send("opt " + chan + " avatar-url")
+        ws.send("join " + serv + ' ' + chan)
+        ws.send("req " + serv + ' ' + chan + " 0")
+        ws.send("list " + serv + ' ' + chan)
+        ws.send("opt " + serv + ' ' + chan + " avatar-url")
     }
 
     ws.onerror = function(e){ console.log(e) }
@@ -361,21 +442,25 @@ function popup(s) {
     var p = document.getElementById("popup")
 
     p.children[0].textContent = s
-    p.style.display = "block"
+    p.style.display = ""
+
+    popupc++
 
     setTimeout(function() {
-        p.style.display = "none"
+        if (popupc <= 1) p.style.display = "none"
+
+        popupc--
     }, 2000)
 }
 
+// XXX
 // submit :: String -> IO ()
 function submit(s){
-    ws.send("msg " + chan + ' ' + s)
+    ws.send("msg " + serv + ' ' + chan + ' ' + s)
 
     var time = (new Date()).getTime() / 1000
 
-    addMessage([{ nick: nick, chan: chan, time: time, msg: s }])
-
+    // XXX what is this please respond???
     history(function(hs) {
         hs.unshift(s)
         hindex = hs.length
@@ -522,31 +607,32 @@ function addMessage(msgs){
     var bh = document.body.scrollHeight
 
     for (var i = 0; i < msgs.length; i++) {
-        if (msgs[i].chan === chan) {
-            var line = document.createElement("span")
-            var ts = document.createElement("span")
-            var av = document.createElement("img")
-            var ni = document.createElement("span")
-            var ms = document.createElement("span")
-
-            line.className = "line"
-            ts.className = "timestamp"
-            av.className = "avatar"
-            ni.className = "nick"
-            ms.className = "message"
-
-            ts.textContent = formatTime(msgs[i].time)
-            ts.name = msgs[i].time
-            ts.title = (new Date(msgs[i].time * 1000)).toUTCString()
-            av.src = avatars[msgs[i].nick] ? avatars[msgs[i].nick] : ""
-            ni.textContent = msgs[i].nick
-            ni.title = msgs[i].nick
-            ms.textContent = msgs[i].msg
-
-            line.appendChild(ts)
-            line.appendChild(av)
-            line.appendChild(ni)
-            line.appendChild(ms)
+        if (msgs[i].serv === serv && msgs[i].chan === chan) {
+            var line = speedcore("span", { className: "line" }, [
+                "span", { className: "linewrap" }, [
+                    "span", { className: "lineuser" }, [
+                        "img", { className: "avatar"
+                               , src: avatars[msgs[i].nick] ? avatars[msgs[i].nick] : ""
+                               }, [],
+                        "span", { className: "nick"
+                                , textContent: msgs[i].nick
+                                , title: msgs[i].nick
+                                }, []
+                    ],
+                    "span", { className: "linecon" }, [
+                        "span", { className: "message"
+                                , textContent: msgs[i].msg
+                                }, []
+                    ],
+                    "span", { className: "linemeta" }, [
+                        "span", { className: "timestamp"
+                                , textContent: formatTime(msgs[i].time)
+                                , name: msgs[i].time
+                                , title: (new Date(msgs[i].time * 1000)).toUTCString()
+                                }, []
+                    ]
+                ],
+            ])
 
             var log = document.getElementById("log")
             log.appendChild(line)
@@ -624,15 +710,6 @@ function warning(n) {
             hindex = hs.length
             return hs
         })
-
-        var lines = document.getElementsByClassName("line")
-
-
-        var lastown
-        for (var i = 0; i < lines.length; i++)
-            if(lines[i].children[1].textContent === nick) lastown = lines[i]
-
-        lastown.parentNode.removeChild(lastown)
     }
 }
 
@@ -644,7 +721,8 @@ function setAvatars() {
     for (var i = 0; i < nks.length; i++) {
         var url = avatars[nks[i].textContent]
 
-        if (url !== undefined) nks[i].previousSibling.src = url
+        if (url !== undefined)
+            nks[i].parentNode.parentNode.querySelector(".avatar").src = url
     }
 
     document.getElementsByClassName("external")[0].value =
@@ -653,10 +731,11 @@ function setAvatars() {
 
 // prepareLine :: String -> IO ()
 function prepareLine(line) {
-    var ts = line.children[0]
-    var av = line.children[1]
-    var ni = line.children[2]
-    var ms = line.children[3]
+    var lw = line.children[0]
+    var av = lw.children[0].children[0]
+    var ni = lw.children[0].children[1]
+    var ms = lw.children[1].children[0]
+    var ts = lw.children[2].children[0]
 
     // Display user nick
     if (ni.textContent === "Chabunko") {
@@ -954,6 +1033,8 @@ function stime(){
 
 </head>
 
+<!-- {{{ HTML -->
+
 <body>
 
 <div id=wrap>
@@ -1029,6 +1110,8 @@ function stime(){
 <script> main() </script>
 
 </body>
+
+<!-- }}} -->
 
 </html>
 

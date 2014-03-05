@@ -26,6 +26,7 @@ import           Control.Monad.State
 import           Control.Monad.Trans.Resource
 
 import           Data.ByteString                     (ByteString)
+import qualified Data.ByteString                     as B
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Text                           (Text)
@@ -58,6 +59,7 @@ debug = io . print
 app :: Request -> ResourceT IO Response
 app req = case pathInfo req of
     ("irc":_) -> ircOut req
+    [x] -> file req $ T.unpack x
     _ -> return $ res "Who are you?!?!? are you food!!!"
 
 ircOut :: MonadIO m => Request -> m Response
@@ -65,7 +67,6 @@ ircOut req = do
     debug $ queryString req
     base <- io $ T.readFile "base.html"
     let query = map conv $ queryString req
-        -- def' = ("html", ps) : query <> def
         def' = query <> def
         html = format base def'
     return . res $ if isJust $ lookup "nick" query
@@ -74,37 +75,48 @@ ircOut req = do
   where
     conv (x, y) = (T.decodeUtf8 x, maybe "" T.decodeUtf8 y)
 
-def :: [(Text, Text)]
-def = [ ("chan", "home")
-      , ("bg", "#fcfcfc")
-      , ("fg", "#101010")
-      , ("link", "blue")
-      , ("font", "Consolas, monospace")
-      , ("size", "9pt")
-      , ("oddbg", "#f0f0f0")
-      , ("evenbg", "#fcfcfc")
-      , ("hoverbg", "#e9e9e9")
-      , ("self", "#888888")
-      , ("info", "#888888")
-      , ("highlight", "red")
-      , ("panelbg", "#fcfcfc")
+file :: MonadIO m => Request -> FilePath -> m Response
+file req x = do
+    file <- io $ B.readFile (filter (/= '/') x)
+    let r = ResponseBuilder
+            ok200
+            []
+            (fromByteString file)
+    return r
 
-      , ("white", "white")
-      , ("black", "black")
+def :: [(Text, Text)]
+def = [ ("chan", "main")
+      , ("serv", "localhost")
+
+      , ("bg", "#efeaea")
+      , ("fg", "#101010")
+      , ("link", "#66ccff")
+      , ("font", "\"Junction Regular\", sans-serif")
+      , ("size", "1em")
+      , ("oddbg", "rgba(255,255,255,0.9)")
+      , ("evenbg", "rgb(252,252,252)")
+      , ("hoverbg", "rgba(0,0,0.0.1)")
+      , ("self", "#666")
+      , ("info", "#666")
+      , ("highlight", "#ff0090")
+      , ("panelbg", "rgb(252,252,252)")
+
+      , ("white", "rgb(247,247,247)")
+      , ("black", "rgb(16,16,16)")
       , ("blue", "blue")
-      , ("green", "green")
-      , ("red", "red")
-      , ("darkred", "darkRed")
-      , ("darkmagenta", "darkMagenta")
-      , ("orange", "orange")
-      , ("yellow", "yellow")
-      , ("lightgreen", "lime")
-      , ("cyan", "cyan")
-      , ("lightcyan", "lightCyan")
+      , ("green", "#66aa11")
+      , ("red", "#ff0090")
+      , ("darkred", "#960050")
+      , ("darkmagenta", "#7e40a5")
+      , ("orange", "#c47f2c")
+      , ("yellow", "#ffba68")
+      , ("lightgreen", "#80ff00")
+      , ("cyan", "#3579a8")
+      , ("lightcyan", "#66ccff")
       , ("lightblue", "lightblue")
-      , ("magenta", "magenta")
-      , ("gray", "gray")
-      , ("lightgray", "lightGray")
+      , ("magenta", "#bb88dd")
+      , ("gray", "#666")
+      , ("lightgray", "#888")
 
       , ("css", "")
       ]

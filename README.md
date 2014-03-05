@@ -14,7 +14,7 @@ The websocket server itself can receive eight different types of commands.
 ## Protocol input
 
 ### Msg
-"msg <channel> <message>" - "msg" followed by a space, a channel (no spaces),
+"msg \<channel\> \<message\>" - "msg" followed by a space, a channel (no spaces),
 another space, and then finally the contents of the message itself.
 
 This sends a message to the server which then relays it to everyone except the
@@ -23,7 +23,7 @@ sender.
 This can return a warning if the user is flooding/spamming.
 
 ### Set
-"set <key> <data>" - "set" followed by a space, then the key which cannot
+"set \<key\> \<data\>" - "set" followed by a space, then the key which cannot
 contain any spaces, another space after that, and finally the data you want to
 associate with the key.
 
@@ -35,20 +35,20 @@ to store users' avatar URLs.
 ### Part
 
 ### Opt
-"opt <channel> <key>" - "opt" followed by a space, a channel (no spaces),
+"opt \<channel\> \<key\>" - "opt" followed by a space, a channel (no spaces),
 another space, and then they key which cannot contain any spaces.
 
 Returns what has been set by every user for the specified key.
 
 ### Opts
-"opts <channel>"
+"opts \<channel\>"
 
 Returns the keys of the stores options.
 
 ### Req
 
 ### List
-"list <channel>"
+"list \<channel\>"
 
 Returns the userlist for a channel.
 
